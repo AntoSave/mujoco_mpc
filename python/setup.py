@@ -23,7 +23,7 @@ import setuptools
 from setuptools.command import build_ext
 from setuptools.command import build_py
 import subprocess
-
+import sys
 
 Path = pathlib.Path
 
@@ -265,7 +265,9 @@ class BuildCMakeExtension(build_ext.build_ext):
 parser = argparse.ArgumentParser(prog='MujocoMPC setup.py')
 parser.add_argument('-S', '--source', help='MujocoMPC source directory', type=os.path.abspath)
 parser.add_argument('-B', '--build', help='MujocoMPC build directory', type=os.path.abspath)
-args, unknown = parser.parse_known_args()
+args, unparsed_args = parser.parse_known_args()
+sys.argv = sys.argv[:1]+unparsed_args
+
 if args.source:
   MUJOCO_MPC_ROOT = Path(args.source)
 if args.build:
