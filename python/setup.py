@@ -14,6 +14,7 @@
 # ==============================================================================
 """Install script for MuJoCo MPC."""
 
+import argparse
 import os
 import pathlib
 import platform
@@ -26,6 +27,8 @@ import subprocess
 
 Path = pathlib.Path
 
+MUJOCO_MPC_ROOT = Path(__file__).parent.parent
+MUJOCO_MPC_BUILD_DIR = MUJOCO_MPC_ROOT / "build"
 
 class GenerateProtoGrpcCommand(setuptools.Command):
   """Specialized setup command to handle agent proto compilation.
@@ -62,6 +65,7 @@ class GenerateProtoGrpcCommand(setuptools.Command):
     agent_proto_source_path = Path(
         "..", "mjpc", "grpc", agent_proto_filename
     ).resolve()
+    print(f"Agent proto source path: {agent_proto_source_path}")
     assert self.build_lib is not None
     build_lib_path = Path(self.build_lib).resolve()
     proto_module_relative_path = Path("mujoco_mpc", "proto", agent_proto_filename)
@@ -113,7 +117,8 @@ class CopyAgentServerBinaryCommand(setuptools.Command):
     self._copy_binary("ui_agent_server")
 
   def _copy_binary(self, binary_name):
-    source_path = Path(f"../build/bin/{binary_name}")
+    source_path = MUJOCO_MPC_BUILD_DIR.resolve() / "bin" / binary_name
+    print(f"Copying {binary_name} from {source_path}")
     if not source_path.exists():
       raise ValueError(
           f"Cannot find `{binary_name}` binary from {source_path}. Please build"
@@ -149,7 +154,8 @@ class CopyTaskAssetsCommand(setuptools.Command):
     self.set_undefined_options("build_ext", ("build_lib", "build_lib"))
 
   def run(self):
-    mjpc_tasks_path = Path(__file__).parent.parent / "build" / "mjpc" / "tasks"
+    mjpc_tasks_path = MUJOCO_MPC_BUILD_DIR.resolve() / "mjpc" / "tasks"
+    print(f"MJPC tasks path: {mjpc_tasks_path}")
     assert mjpc_tasks_path.exists(), "Build MJPC before installing Python API"
     source_paths = (
       tuple(mjpc_tasks_path.rglob("*.xml"))
@@ -209,8 +215,6 @@ class BuildCMakeExtension(build_ext.build_ext):
     """Check for CMake."""
     cmake_command = "cmake"
     build_cfg = "Debug"
-    mujoco_mpc_root = Path(__file__).parent.parent
-    mujoco_mpc_build_dir = mujoco_mpc_root / "build"
     cmake_configure_args = [
         "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE",
         f"-DCMAKE_BUILD_TYPE:STRING={build_cfg}",
@@ -236,10 +240,10 @@ class BuildCMakeExtension(build_ext.build_ext):
         [
             cmake_command,
             *cmake_configure_args,
-            f"-S{mujoco_mpc_root.resolve()}",
-            f"-B{mujoco_mpc_build_dir.resolve()}",
+            f"-S{MUJOCO_MPC_ROOT.resolve()}",
+            f"-B{MUJOCO_MPC_BUILD_DIR.resolve()}",
         ],
-        cwd=mujoco_mpc_root,
+        cwd=MUJOCO_MPC_ROOT,
     )
 
     print("Building `agent_server` and `ui_agent_server` with CMake")
@@ -247,7 +251,7 @@ class BuildCMakeExtension(build_ext.build_ext):
         [
             cmake_command,
             "--build",
-            str(mujoco_mpc_build_dir.resolve()),
+            str(MUJOCO_MPC_BUILD_DIR.resolve()),
             "--target",
             "agent_server",
             "ui_agent_server",
@@ -255,9 +259,19 @@ class BuildCMakeExtension(build_ext.build_ext):
             "--config",
             build_cfg,
         ],
-        cwd=mujoco_mpc_root,
+        cwd=MUJOCO_MPC_ROOT,
     )
 
+parser = argparse.ArgumentParser(prog='MujocoMPC setup.py')
+parser.add_argument('-S', '--source', help='MujocoMPC source directory', type=os.path.abspath)
+parser.add_argument('-B', '--build', help='MujocoMPC build directory', type=os.path.abspath)
+args, unknown = parser.parse_known_args()
+if args.source:
+  MUJOCO_MPC_ROOT = Path(args.source)
+if args.build:
+  MUJOCO_MPC_BUILD_DIR = Path(args.build)
+print(f"MuJoCo MPC root: {MUJOCO_MPC_ROOT}")
+print(f"MuJoCo MPC build dir: {MUJOCO_MPC_BUILD_DIR}")
 
 setuptools.setup(
     name="mujoco_mpc",
