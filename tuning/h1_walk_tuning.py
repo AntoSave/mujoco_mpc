@@ -176,6 +176,7 @@ def main():
             )
             if i % steps_per_planning_iteration == 0:
                 agent.planner_step()
+            agent.get_state
             # traj = agent.best_trajectory()
             # traj_states = traj['states']
             # traj_actions = traj['actions']

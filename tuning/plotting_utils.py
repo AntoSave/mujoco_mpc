@@ -6,7 +6,7 @@ import time
 import dearpygui.dearpygui as dpg
 from collections import deque
 
-DEQUE_MAX_LEN = 200
+DEQUE_MAX_LEN = 800
 
 class _Plot:
     def __init__(self, id, name, window_id, y_range = None):
@@ -127,8 +127,8 @@ class PlotManager(Process):
                 self.__flush_queue(i)
             dpg.render_dearpygui_frame()
             end = time.perf_counter_ns()
-            print(f"Time taken to render frame: {(end - start) / 1e6} ms")
-            print(f"FPS: {1 / ((end - start) / 1e9)}")
+            # print(f"Time taken to render frame: {(end - start) / 1e6} ms")
+            # print(f"FPS: {1 / ((end - start) / 1e9)}")
         dpg.destroy_context()
 
 if __name__ == "__main__":
