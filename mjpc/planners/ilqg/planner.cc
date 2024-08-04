@@ -375,6 +375,7 @@ void iLQGPlanner::Plots(mjvFigure* fig_planner, mjvFigure* fig_timer,
 
 // single iLQG iteration
 void iLQGPlanner::Iteration(int horizon, ThreadPool& pool) {
+  //std::cout<<"Iteration"<<std::endl;
   // set previous best cost
   double previous_return = candidate_policy[0].trajectory.total_return;
 

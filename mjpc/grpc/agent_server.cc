@@ -45,7 +45,8 @@ int main(int argc, char** argv) {
       grpc::experimental::LocalServerCredentials(LOCAL_TCP);
   grpc::ServerBuilder builder;
   builder.AddListeningPort(server_address, server_credentials);
-
+  std::cout<<"[Agent Service] Avaiable hardware threads: " <<mjpc::NumAvailableHardwareThreads()<<std::endl;
+  std::cout<<"[Agent Service] Starting agent with " <<absl::GetFlag(FLAGS_mjpc_workers)<<" threads"<<std::endl;
   mjpc::agent_grpc::AgentService service(mjpc::GetTasks(),
                                          absl::GetFlag(FLAGS_mjpc_workers));
   builder.SetMaxReceiveMessageSize(80 * 1024 * 1024);
