@@ -88,6 +88,7 @@ void controller(const mjModel* m, mjData* data) {
   }
   // if simulation:
   if (sim->agent->action_enabled) {
+    //std::cout<<"Sampling agent policy"<<std::endl;
     sim->agent->ActivePlanner().ActionFromPolicy(
         data->ctrl, &sim->agent->state.state()[0],
         sim->agent->state.time());

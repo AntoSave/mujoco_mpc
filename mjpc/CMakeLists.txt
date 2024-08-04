@@ -48,6 +48,8 @@ add_library(
   tasks/cartpole/cartpole.h
   tasks/fingers/fingers.cc
   tasks/fingers/fingers.h
+  tasks/h1/trot/trot.cc
+  tasks/h1/trot/trot.h
   tasks/h1/walk/walk.cc
   tasks/h1/walk/walk.h
   tasks/h1/walk-baseline/walk-baseline.cc
