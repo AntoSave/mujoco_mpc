@@ -40,6 +40,8 @@ add_library(
   tasks/acrobot/acrobot.h
   tasks/allegro/allegro.cc
   tasks/allegro/allegro.h
+  tasks/bimanual/insert/insert.cc
+  tasks/bimanual/insert/insert.h
   tasks/bimanual/handover/handover.cc
   tasks/bimanual/handover/handover.h
   tasks/bimanual/reorient/reorient.cc
@@ -52,8 +54,10 @@ add_library(
   tasks/h1/trot/trot.h
   tasks/h1/walk/walk.cc
   tasks/h1/walk/walk.h
-  tasks/h1/walk-baseline/walk-baseline.cc
-  tasks/h1/walk-baseline/walk-baseline.h
+  tasks/humanoid/interact/interact.cc
+  tasks/humanoid/interact/interact.h
+  tasks/humanoid/interact/contact_keyframe.cc
+  tasks/humanoid/interact/contact_keyframe.h
   tasks/humanoid/stand/stand.cc
   tasks/humanoid/stand/stand.h
   tasks/humanoid/tracking/tracking.cc
