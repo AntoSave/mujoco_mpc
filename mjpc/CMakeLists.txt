@@ -52,6 +52,8 @@ add_library(
   tasks/fingers/fingers.h
   tasks/h1/walk/walk.cc
   tasks/h1/walk/walk.h
+  tasks/h1/tracking/tracking.cc
+  tasks/h1/tracking/tracking.h
   tasks/humanoid/interact/interact.cc
   tasks/humanoid/interact/interact.h
   tasks/humanoid/interact/contact_keyframe.cc
