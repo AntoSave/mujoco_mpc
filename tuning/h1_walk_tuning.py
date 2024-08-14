@@ -139,18 +139,18 @@ def main():
         configure_plot_manager(plot_manager, model)
         plot_manager.start()
         
-        kp_slider_manager = SliderManager(name = "kp")
-        kd_slider_manager = SliderManager(name = "kd")
-        ref_slider_manager = SliderManager(name = "ref")
-        add_slider_foreach_joint(kp_slider_manager, model, lambda i, j: kp[i-1], 0.0, 800.0)
-        add_slider_foreach_joint(kd_slider_manager, model, lambda i, j: kd[i-1], 0.0, 50.0)
-        add_slider_foreach_joint(ref_slider_manager, model, lambda _, j: j.qpos0, lambda _, j: j.range[0], lambda _, j: j.range[1])
-        add_slider_foreach_joint(ref_slider_manager, model, 0, -1.0, 1.0, prefix="b_")
-        add_slider_foreach_joint(ref_slider_manager, model, 0, 0, 0.5, prefix="A_")
-        add_slider_foreach_joint(ref_slider_manager, model, 0, 0, 2.0, prefix="f_")
-        kp_slider_manager.start()
-        kd_slider_manager.start()
-        ref_slider_manager.start()
+        # kp_slider_manager = SliderManager(name = "kp")
+        # kd_slider_manager = SliderManager(name = "kd")
+        # ref_slider_manager = SliderManager(name = "ref")
+        # add_slider_foreach_joint(kp_slider_manager, model, lambda i, j: kp[i-1], 0.0, 800.0)
+        # add_slider_foreach_joint(kd_slider_manager, model, lambda i, j: kd[i-1], 0.0, 50.0)
+        # add_slider_foreach_joint(ref_slider_manager, model, lambda _, j: j.qpos0, lambda _, j: j.range[0], lambda _, j: j.range[1])
+        # add_slider_foreach_joint(ref_slider_manager, model, 0, -1.0, 1.0, prefix="b_")
+        # add_slider_foreach_joint(ref_slider_manager, model, 0, 0, 0.5, prefix="A_")
+        # add_slider_foreach_joint(ref_slider_manager, model, 0, 0, 2.0, prefix="f_")
+        # kp_slider_manager.start()
+        # kd_slider_manager.start()
+        # ref_slider_manager.start()
         
         
         while viewer.is_running():
@@ -176,7 +176,8 @@ def main():
             )
             if i % steps_per_planning_iteration == 0:
                 agent.planner_step()
-            agent.get_state
+            elapsed_time = time.time() - step_start
+            print(f"Planning {i} took {elapsed_time:.3f} seconds")
             # traj = agent.best_trajectory()
             # traj_states = traj['states']
             # traj_actions = traj['actions']
@@ -202,8 +203,11 @@ def main():
             #CONTROL LAW
             
             # set ctrl from agent policy
+            t = time.time()
             data.ctrl = agent.get_action(nominal_action=True)
-            
+            elapsed_time = time.time() - t
+            print(f"Getting action {i} took {elapsed_time:.3f} seconds")
+                        
             mujoco.mj_step1(model, data)
             # data.ctrl = np.multiply((q_ref-q), kp) + np.multiply((q_dot_ref-q_dot), kd)
             # data.ctrl += data.qfrc_bias[6:]
@@ -233,8 +237,6 @@ def main():
             time_until_next_step = model.opt.timestep - (time.time() - step_start)
             if time_until_next_step > 0:
                 time.sleep(time_until_next_step)
-            elif i < 1:
-                print("Simulation not running in real time!")
 
 if __name__ == "__main__":
     main()
