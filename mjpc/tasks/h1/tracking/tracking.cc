@@ -20,6 +20,7 @@
 #include <mujoco/mujoco.h>
 #include "mjpc/task.h"
 #include "mjpc/utilities.h"
+#include "mjpc/spline/spline.h"
 
 namespace mjpc::h1 {
 std::string Tracking::XmlPath() const {
@@ -38,16 +39,26 @@ std::string Tracking::Name() const { return "H1 Tracking"; }
 void Tracking::ResidualFn::Residual(const mjModel* model, const mjData* data,
                                 double* residual) const {
   int counter = 0;
-  residual[counter++] = 0.0;
-  residual[counter++] = 0.0;
+  std::vector<double> ref = ref_spline_qpos.Sample(data->time);
 
+  // Joint Position
   for (int i = 0; i < model->nq; i++) {
-    residual[counter++] = data->qpos[i];
+    residual[counter++] = ref[i] - data->qpos[i];
   }
 
+  // Joint Velocity
   for (int i = 0; i < model->nv; i++) {
-    residual[counter++] = data->qvel[i];
+    residual[counter++] = 0.0;
   }
+
+  // Control
+  for (int i = 0; i < 19; i++) {
+    residual[counter++] = 0.0;
+  }
+
+  // std::cout << "nq: " << model->nq << " nv: " << model->nv << " na: " << model->na << std::endl;
+  // std::cout << "counter: " << counter << std::endl;
+  // std::cout << "nsensor: " << model->nsensor << std::endl;
 
   // sensor dim sanity check
   // TODO: use this pattern everywhere and make this a utility function
@@ -62,6 +73,27 @@ void Tracking::ResidualFn::Residual(const mjModel* model, const mjData* data,
         "mismatch between total user-sensor dimension"
         "and actual length of residual %d",
         counter);
+  }
+}
+
+Tracking::ResidualFn::ResidualFn(const Tracking* task) : mjpc::BaseResidualFn(task) {
+  ref_spline_qpos.SetInterpolation(spline::SplineInterpolation::kLinearSpline);
+}
+
+// --------------------- Transition for humanoid task -------------------------
+//   Set `data->mocap_pos` based on `data->time` to move the mocap sites.
+//   Linearly interpolate between two consecutive key frames in order to
+//   smooth the transitions between keyframes.
+// ----------------------------------------------------------------------------
+void Tracking::TransitionLocked(mjModel *model, mjData *d) {
+  mjtNum ref_time = d->userdata[0];
+  std::cout << "TransitionLocked\td->time" << d->time << "\tref time" << ref_time << std::endl;
+  if(residual_.ref_time != ref_time) {
+    residual_.ref_time = ref_time;
+    residual_.ref_spline_qpos.Clear();
+    residual_.ref_spline_qpos.AddNode(d->time, absl::Span<const mjtNum>(d->qpos, model->nq));
+    residual_.ref_spline_qpos.AddNode(ref_time, absl::Span<const mjtNum>(d->userdata+1, model->nq));
+    //std::cout << "Reference updated" << std::endl;
   }
 }
 

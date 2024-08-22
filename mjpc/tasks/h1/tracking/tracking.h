@@ -17,6 +17,7 @@
 
 #include <mujoco/mujoco.h>
 #include "mjpc/task.h"
+#include "mjpc/spline/spline.h"
 
 namespace mjpc {
 namespace h1 {
@@ -25,7 +26,7 @@ class Tracking : public Task {
  public:
   class ResidualFn : public mjpc::BaseResidualFn {
    public:
-    explicit ResidualFn(const Tracking* task) : mjpc::BaseResidualFn(task) {}
+    explicit ResidualFn(const Tracking* task);
 
     // ------------------ Residuals for humanoid tracking task ------------
     //   Number of residuals:
@@ -37,12 +38,19 @@ class Tracking : public Task {
     // --------------------------------------------------------------------
     void Residual(const mjModel* model, const mjData* data,
                   double* residual) const override;
+    
+    mjtNum ref_time = 0.0;
+    mjtNum ref_qpos[26] = {0.0};
+    mjtNum ref_qvel[25] = {0.0};
+    spline::TimeSpline ref_spline_qpos = spline::TimeSpline(26);
   };
 
   Tracking() : residual_(this) {}
 
   std::string Name() const override;
   std::string XmlPath() const override;
+
+  void TransitionLocked(mjModel* model, mjData* data) override;
 
  protected:
   std::unique_ptr<mjpc::ResidualFn> ResidualLocked() const override {
