@@ -22,6 +22,8 @@
 #include "mjpc/utilities.h"
 #include "mjpc/spline/spline.h"
 
+#include "ndcurves/polynomial.h"
+
 namespace mjpc::h1 {
 std::string Tracking::XmlPath() const {
   return GetModelPath("h1/tracking/task.xml");
@@ -39,11 +41,11 @@ std::string Tracking::Name() const { return "H1 Tracking"; }
 void Tracking::ResidualFn::Residual(const mjModel* model, const mjData* data,
                                 double* residual) const {
   int counter = 0;
-  std::vector<double> ref = ref_spline_qpos.Sample(data->time);
-
+  //std::cout << "Residual\tdata->time" << data->time << "ref_time" << ref_time << std::endl;
+  std::vector<double> curr_ref_qpos = ref_spline_qpos.Sample(data->time);
   // Joint Position
   for (int i = 0; i < model->nq; i++) {
-    residual[counter++] = ref[i] - data->qpos[i];
+    residual[counter++] = curr_ref_qpos[i] - data->qpos[i];
   }
 
   // Joint Velocity
@@ -77,7 +79,7 @@ void Tracking::ResidualFn::Residual(const mjModel* model, const mjData* data,
 }
 
 Tracking::ResidualFn::ResidualFn(const Tracking* task) : mjpc::BaseResidualFn(task) {
-  ref_spline_qpos.SetInterpolation(spline::SplineInterpolation::kLinearSpline);
+  ref_spline_qpos.SetInterpolation(spline::SplineInterpolation::kCubicSpline);
 }
 
 // --------------------- Transition for humanoid task -------------------------
@@ -87,7 +89,7 @@ Tracking::ResidualFn::ResidualFn(const Tracking* task) : mjpc::BaseResidualFn(ta
 // ----------------------------------------------------------------------------
 void Tracking::TransitionLocked(mjModel *model, mjData *d) {
   mjtNum ref_time = d->userdata[0];
-  std::cout << "TransitionLocked\td->time" << d->time << "\tref time" << ref_time << std::endl;
+  //std::cout << "TransitionLocked\td->time" << d->time << "\tref time" << ref_time << std::endl;
   if(residual_.ref_time != ref_time) {
     residual_.ref_time = ref_time;
     residual_.ref_spline_qpos.Clear();
@@ -95,6 +97,10 @@ void Tracking::TransitionLocked(mjModel *model, mjData *d) {
     residual_.ref_spline_qpos.AddNode(ref_time, absl::Span<const mjtNum>(d->userdata+1, model->nq));
     //std::cout << "Reference updated" << std::endl;
   }
+  //std::cout << "TransitionLocked\td->time" << d->time << "\tref time" << ref_time << std::endl;
+  std::vector<double> curr_ref_qpos = residual_.ref_spline_qpos.Sample(d->time);
+  mju_copy(d->userdata+1+model->nq, curr_ref_qpos.data(), model->nq); // Copy the reference to userdata[:nq]
+  //std::cout << "Position updated" << std::endl;
 }
 
 }  // namespace mjpc::h1

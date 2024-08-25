@@ -149,6 +149,7 @@ add_library(
   task.cc
   task.h
   $<TARGET_OBJECTS:mujoco::platform_ui_adapter>
+  ${ndcurves_INCLUDEDIR}/ndcurves/polynomial.h
 )
 set_target_properties(libmjpc PROPERTIES OUTPUT_NAME mjpc)
 target_compile_options(libmjpc PUBLIC ${MJPC_COMPILE_OPTIONS})
@@ -161,6 +162,7 @@ target_link_libraries(
   absl::log
   absl::random_random
   absl::span
+  Eigen3::Eigen
   glfw
   lodepng
   mujoco::mujoco
@@ -172,6 +174,8 @@ target_include_directories(libmjpc
   PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_BINARY_DIR}/..
+  ${ndcurves_INCLUDEDIR}
+  ${EIGEN_INCLUDE_DIR}
 )
 
 add_executable(
@@ -189,7 +193,7 @@ target_link_libraries(
   threadpool
   Threads::Threads
 )
-target_include_directories(mjpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_include_directories(mjpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ndcurves_INCLUDEDIR})
 target_compile_options(mjpc PUBLIC ${MJPC_COMPILE_OPTIONS})
 target_link_options(mjpc PRIVATE ${MJPC_LINK_OPTIONS})
 target_compile_definitions(mjpc PRIVATE MJSIMULATE_STATIC)
