@@ -39,6 +39,8 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(MpcOptions)
 include(MujocoMacOS)
+list(APPEND CMAKE_PREFIX_PATH /opt/openrobots/)
+set(ENV{PKG_CONFIG_PATH} /opt/openrobots/lib/pkgconfig)
 
 option(MJPC_BUILD_TESTS "Build tests for MJPC" ON)
 option(MJPC_GRPC_BUILD_TESTS "Build tests for gRPC" ON)
@@ -49,6 +51,9 @@ include(FindOrFetch)
 
 find_package(Python)
 find_package(Threads REQUIRED)
+
+find_package (Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(ndcurves CONFIG REQUIRED)
 
 set(MUJOCO_BUILD_EXAMPLES OFF)
 set(MUJOCO_BUILD_SIMULATE ON)

@@ -19,6 +19,8 @@
 #include "mjpc/task.h"
 #include "mjpc/spline/spline.h"
 
+#include "ndcurves/polynomial.h"
+
 namespace mjpc {
 namespace h1 {
 
@@ -43,6 +45,7 @@ class Tracking : public Task {
     mjtNum ref_qpos[26] = {0.0};
     mjtNum ref_qvel[25] = {0.0};
     spline::TimeSpline ref_spline_qpos = spline::TimeSpline(26);
+    ndcurves::polynomial_t poly;
   };
 
   Tracking() : residual_(this) {}

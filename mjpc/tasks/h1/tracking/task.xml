@@ -1,7 +1,7 @@
 <mujoco model="H1 Tracking">
   <include file="../../common.xml"/>
   <include file="../h1_modified.xml" />
-  <size memory="400K" nuserdata="52"/>
+  <size memory="400K" nuserdata="53"/>
 
   <visual>
     <global offwidth="1280" offheight="720"/>
