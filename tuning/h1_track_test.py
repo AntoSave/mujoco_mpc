@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from mujoco_mpc import agent as agent_lib
 import scipy.stats
 
+from plotting_utils import PlotManager
+
 tracking_model_path = (
         pathlib.Path(__file__).parent
         / "../build/mjpc/tasks/h1/tracking/task.xml"
@@ -36,6 +38,14 @@ tracking_agent = agent_lib.Agent(task_id="H1 Tracking",
                         / "mjpc"
                         / "agent_server")
 
+plot_manager = PlotManager()
+w = plot_manager.add_window((13, 2), "Errors")
+for i in range(1,26):
+    plot_manager.add_plot(w, str(i), (-0.1, 0.1))
+w2 = plot_manager.add_window((13, 2), "References")
+for i in range(1,26):
+    plot_manager.add_plot(w2, str(i), (-0.4, 0.4))
+plot_manager.start()
 def get_next_reference(data):
     walking_agent.set_state(
         time=data.time,
@@ -47,8 +57,8 @@ def get_next_reference(data):
     for _ in range(10):
         walking_agent.planner_step()
     best_trajectory = walking_agent.best_trajectory()
-    reference_qpos = best_trajectory["states"][2, :walking_model.nq]
-    reference_time = best_trajectory["times"][2]
+    reference_qpos = best_trajectory["states"][-1, :walking_model.nq]
+    reference_time = best_trajectory["times"][-1]
     return reference_time, reference_qpos
 
 horizon = 0.0
@@ -82,9 +92,12 @@ with mujoco.viewer.launch_passive(tracking_model, tracking_data) as viewer, Thre
             tracking_agent.planner_step()
             elapsed = time.time() - t
             print("Elapsed planning time: ", elapsed)
-
+        
         tracking_data.ctrl = tracking_agent.get_action(nominal_action=False)
         mujoco.mj_step(tracking_model, tracking_data)
+        curr_ref = tracking_agent.get_state().userdata[tracking_model.nq + 1:]
+        plot_manager.send_data(w, (tracking_data.time, curr_ref - tracking_data.qpos))
+        plot_manager.send_data(w2, (tracking_data.time, curr_ref))
         print(f"Step {i} state: {tracking_data.qpos}")
         viewer.sync()
         i = i + 1
