@@ -42,7 +42,14 @@ void Tracking::ResidualFn::Residual(const mjModel* model, const mjData* data,
                                 double* residual) const {
   int counter = 0;
   //std::cout << "Residual\tdata->time" << data->time << "ref_time" << ref_time << std::endl;
-  std::vector<double> curr_ref_qpos = ref_spline_qpos.Sample(data->time);
+  //std::vector<double> curr_ref_qpos = ref_spline_qpos.Sample(data->time);
+  ndcurves::pointX_t curr_ref_qpos;
+  if(ref_time>0.0){
+    std::cout << "Poly" << std::endl;
+    curr_ref_qpos = poly(data->time);
+  } else {
+    curr_ref_qpos = Eigen::VectorXd::Zero(model->nq);
+  }
   // Joint Position
   for (int i = 0; i < model->nq; i++) {
     residual[counter++] = curr_ref_qpos[i] - data->qpos[i];
@@ -90,17 +97,27 @@ Tracking::ResidualFn::ResidualFn(const Tracking* task) : mjpc::BaseResidualFn(ta
 void Tracking::TransitionLocked(mjModel *model, mjData *d) {
   mjtNum ref_time = d->userdata[0];
   //std::cout << "TransitionLocked\td->time" << d->time << "\tref time" << ref_time << std::endl;
-  if(residual_.ref_time != ref_time) {
+  if(ref_time > residual_.ref_time) {
     residual_.ref_time = ref_time;
-    residual_.ref_spline_qpos.Clear();
-    residual_.ref_spline_qpos.AddNode(d->time, absl::Span<const mjtNum>(d->qpos, model->nq));
-    residual_.ref_spline_qpos.AddNode(ref_time, absl::Span<const mjtNum>(d->userdata+1, model->nq));
+    // residual_.ref_spline_qpos.Clear();
+    // residual_.ref_spline_qpos.AddNode(d->time, absl::Span<const mjtNum>(d->qpos, model->nq));
+    // residual_.ref_spline_qpos.AddNode(ref_time, absl::Span<const mjtNum>(d->userdata+1, model->nq));
     //std::cout << "Reference updated" << std::endl;
+    Eigen::Map<Eigen::VectorXd> curr_qpos(d->qpos, model->nq);
+    Eigen::Map<Eigen::VectorXd> ref_qpos(d->userdata+1, model->nq);
+    std::flush(std::cout);
+    ndcurves::t_pointX_t points;
+    points.push_back(curr_qpos);
+    points.push_back(ref_qpos);
+    residual_.poly = ndcurves::polynomial_t(points.begin(),points.end(),d->time,ref_time);
   }
   //std::cout << "TransitionLocked\td->time" << d->time << "\tref time" << ref_time << std::endl;
-  std::vector<double> curr_ref_qpos = residual_.ref_spline_qpos.Sample(d->time);
-  mju_copy(d->userdata+1+model->nq, curr_ref_qpos.data(), model->nq); // Copy the reference to userdata[:nq]
-  //std::cout << "Position updated" << std::endl;
+  if(residual_.ref_time > 0.0){
+    ndcurves::pointX_t curr_ref_qpos = residual_.poly(d->time);
+    //std::vector<double> curr_ref_qpos = residual_.ref_spline_qpos.Sample(d->time)
+    mju_copy(d->userdata+1+model->nq, curr_ref_qpos.data(), model->nq); // Copy the reference to userdata[:nq]
+    //std::cout << "Position updated" << std::endl;
+  }
 }
 
 }  // namespace mjpc::h1
