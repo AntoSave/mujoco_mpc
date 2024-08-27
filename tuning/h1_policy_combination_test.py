@@ -32,13 +32,14 @@ agent_x.set_cost_weights({'Face forward':0.0, 'Posture up': 0.1})
 agent_y.set_cost_weights({'Face forward':0.0, 'Posture up': 0.1})
 
 current_agent = 0
-steps_per_planning_iteration = 5
+steps_per_planning_iteration = 10
 i = 0
 goal = np.array([10.0, 10.0])
 obstacle = np.array([3.0, 3.0])
 
 def plan_and_get_trajectory(agent):
-    agent.planner_step()
+    for _ in range(10):
+        agent.planner_step()
     return agent.best_trajectory()
 
 def cost(x):
@@ -88,8 +89,8 @@ with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() a
             traj1_states = traj1["states"]
             traj2_states = traj2["states"]
             #euler distance from goal
-            traj1_goal_distance = cost(data.qpos[:2]+np.asarray([0.5, 0.0])) #cost(traj1_states[-1,:2])
-            traj2_goal_distance = cost(data.qpos[:2]+np.asarray([0.0, 0.5]))#cost(traj2_states[-1,:2])
+            traj1_goal_distance = cost(traj1_states[-1,:2]) #cost(data.qpos[:2]+np.asarray([0.5, 0.0])) 
+            traj2_goal_distance = cost(traj2_states[-1,:2]) #cost(data.qpos[:2]+np.asarray([0.0, 0.5]))
             current_agent = 0 if traj1_goal_distance < traj2_goal_distance else 1
 
         if current_agent == 0:
@@ -101,6 +102,7 @@ with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() a
         print(f"Step {i} state: {data.qpos}")
         viewer.sync()
         i = i + 1
-        TRAJ.append(np.array(data.qpos))
+        print(np.asarray([data.time]).shape, np.array(data.qpos).shape, np.array(data.qvel).shape)
+        TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
     TRAJ = np.stack(TRAJ)
     np.save("traj.npy", TRAJ)
