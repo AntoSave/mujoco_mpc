@@ -20,6 +20,7 @@
 #include "mjpc/spline/spline.h"
 
 #include "ndcurves/polynomial.h"
+#include "ndcurves/se3_curve.h"
 
 namespace mjpc {
 namespace h1 {
@@ -41,11 +42,22 @@ class Tracking : public Task {
     void Residual(const mjModel* model, const mjData* data,
                   double* residual) const override;
     
+    void GetCurrReference(const mjModel* model,
+                          const mjData* data,
+                          Eigen::Vector3d &curr_ref_transform_pos,
+                          Eigen::Quaterniond &curr_ref_transform_rot,
+                          Eigen::VectorXd &curr_ref_transform_d,
+                          ndcurves::pointX_t &curr_ref_qpos,
+                          ndcurves::pointX_t &curr_ref_qvel) const;
+
     mjtNum ref_time = 0.0;
-    mjtNum ref_qpos[26] = {0.0};
-    mjtNum ref_qvel[25] = {0.0};
-    spline::TimeSpline ref_spline_qpos = spline::TimeSpline(26);
+    ndcurves::SE3Curve_t::point_t start_transform;
+    ndcurves::SE3Curve_t::point_t ref_transform;
+    ndcurves::t_pointX_t ref_qpos;
+    ndcurves::t_pointX_t ref_qvel;
+    //spline::TimeSpline ref_spline_qpos = spline::TimeSpline(26);
     ndcurves::polynomial_t poly;
+    ndcurves::SE3Curve_t se3_curve;
   };
 
   Tracking() : residual_(this) {}
