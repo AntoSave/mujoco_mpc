@@ -151,7 +151,8 @@ add_library(
   task.cc
   task.h
   $<TARGET_OBJECTS:mujoco::platform_ui_adapter>
-  ${ndcurves_INCLUDEDIR}/ndcurves/polynomial.h
+  ${ndcurves_INCLUDE_DIRS}/ndcurves/polynomial.h
+  ${ndcurves_INCLUDE_DIRS}/ndcurves/so3_linear.h
 )
 set_target_properties(libmjpc PROPERTIES OUTPUT_NAME mjpc)
 target_compile_options(libmjpc PUBLIC ${MJPC_COMPILE_OPTIONS})
@@ -176,7 +177,7 @@ target_include_directories(libmjpc
   PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_BINARY_DIR}/..
-  ${ndcurves_INCLUDEDIR}
+  ${ndcurves_INCLUDE_DIRS}
   ${EIGEN_INCLUDE_DIR}
 )
 
