@@ -24,7 +24,9 @@ def pygame_handle_events():
             pygame.quit()
             exit()
     pressed = pygame.key.get_pressed()
-    if pressed[pygame.K_w]:
+    if pressed[pygame.K_r]:
+        return "RESET"
+    elif pressed[pygame.K_w]:
         return "FORWARD"
     elif pressed[pygame.K_a]:
         return "LEFT"
@@ -41,6 +43,9 @@ def plan_and_get_trajectory(agent):
 
 def quat_to_forward_vector(quat):
     return scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=True).as_matrix()[:2,0]
+
+def vector_to_quat(vector):
+    return scipy.spatial.transform.Rotation.from_euler('z', np.arctan2(vector[1], vector[0])).as_quat(canonical=True, scalar_first=True)
 
 def rotate_quat(quat, angle):
     r = scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=True)
@@ -89,6 +94,23 @@ def get_mocap_reference_3(data, command):
     elif command == "BACKWARD":
         pass
     return pos_ref, quat_ref
+
+def get_mocap_reference_4(data, command):
+    fw = quat_to_forward_vector(data.qpos[3:7])
+    pos_ref = data.qpos[:3]
+    fw_mean = data.sensor('torso_forward').data[:2]
+    quat_ref = data.qpos[3:7]
+    if command == "FORWARD":
+        pos_ref = pos_ref + np.concatenate([fw_mean, [0]])
+    elif command == "LEFT":
+        fw_mean = quat_to_forward_vector(rotate_quat(vector_to_quat(fw_mean), np.pi/4))
+        pos_ref = pos_ref + np.concatenate([fw_mean, [0]])
+    elif command == "RIGHT":
+        fw_mean = quat_to_forward_vector(rotate_quat(vector_to_quat(fw_mean), -np.pi/4))
+        pos_ref = pos_ref + np.concatenate([fw_mean, [0]])
+    elif command == "BACKWARD":
+        pass
+    return pos_ref, quat_ref
     
 
 if __name__ == "__main__":
@@ -104,13 +126,15 @@ if __name__ == "__main__":
                         server_binary_path=pathlib.Path(agent_lib.__file__).parent
                         / "mjpc"
                         / "agent_server")
-    agent.set_cost_weights({'Posture up': 0.1})
+    agent.set_cost_weights({'Posture arms': 0.04, 'Posture torso': 0.1, 'Face goal': 4.0})
     i=0
     steps_per_planning_iteration = 10
     init_pygame()
     with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() as executor:
         while viewer.is_running():
             command = pygame_handle_events()
+            if command == "RESET":
+                mujoco.mj_resetData(model, data)
             if command is not None:
                 print(command)
             data.mocap_pos, data.mocap_quat = get_mocap_reference_3(data, command)
