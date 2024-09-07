@@ -63,7 +63,7 @@ current_agent = 0
 steps_per_planning_iteration = 10
 i = 0
 goal = np.array([10.0, 10.0])
-obstacle = np.array([3.0, 1.0])
+obstacle = np.array([3.0, 3.0])
 
 def plan_and_get_trajectory(agent):
     for _ in range(10):
@@ -135,7 +135,7 @@ def crowdsourcing_cost(x,y,forward_vector):
     x = np.array([x,y])
     closest_point, dist, tangent_vector = closest_point_on_path(x)
     fw_point = np.array([fit_x(closest_point), fit_y(closest_point)]) + 0.5 * forward_vector
-    return dist + np.linalg.norm(x-fw_point) + 10 * np.dot(forward_vector, tangent_vector)
+    return dist + np.linalg.norm(x-fw_point) + 100 * np.dot(forward_vector, tangent_vector)
 
 plt.show()
 input("Press Enter to continue...")
@@ -164,7 +164,7 @@ with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() a
                 qvel=data.qvel,
                 act=data.act,
                 mocap_pos=data.qpos[:3],
-                mocap_quat=rotate_quat(data.qpos[3:7], np.pi/8),
+                mocap_quat=rotate_quat(data.qpos[3:7], np.pi/2),
                 userdata=data.userdata,
             )
             agent_right.set_state(
@@ -173,7 +173,7 @@ with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() a
                 qvel=data.qvel,
                 act=data.act,
                 mocap_pos=data.qpos[:3],
-                mocap_quat=rotate_quat(data.qpos[3:7], -np.pi/8),
+                mocap_quat=rotate_quat(data.qpos[3:7], -np.pi/2),
                 userdata=data.userdata,
             )
             
@@ -202,7 +202,6 @@ with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() a
                 agent = agent_left
             else:
                 agent = agent_right
-            agent = agent_left
             data.ctrl = agent.get_action(nominal_action=True)
             mujoco.mj_step(model, data)
             print(f"Step {i} state: {data.qpos}")
