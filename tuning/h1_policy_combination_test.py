@@ -38,7 +38,7 @@ agent_y.set_cost_weights({'Posture up': 0.1})
 # Experiment info
 current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 experiment_name = f"h1_walk_{current_datetime}"
-experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / experiment_name
+experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / "absolute_policy_combination" / experiment_name
 if not experiment_folder.exists():
     experiment_folder.mkdir(parents=True)
 
@@ -146,4 +146,4 @@ with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() a
             print(np.asarray([data.time]).shape, np.array(data.qpos).shape, np.array(data.qvel).shape)
             TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
         TRAJ = np.stack(TRAJ)
-        np.save("traj.npy", TRAJ)
+        np.save(experiment_folder / "traj.npy", TRAJ)

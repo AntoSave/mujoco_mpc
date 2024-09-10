@@ -28,14 +28,12 @@ agent = agent_lib.Agent(task_id="H1 Walk",
                         server_binary_path=pathlib.Path(agent_lib.__file__).parent
                         / "mjpc"
                         / "agent_server")
-# agent_x.set_cost_weights({'Face goal':0.0, 'Posture up': 0.1})
-# agent_y.set_cost_weights({'Face goal':0.0, 'Posture up': 0.1})
 agent.set_cost_weights({'Posture arms': 0.06, 'Posture torso': 0.05, 'Face goal': 4.0})
 
 # Experiment info
 current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 experiment_name = f"h1_walk_{current_datetime}"
-experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / experiment_name
+experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / "relative_policy_combination" / experiment_name
 if not experiment_folder.exists():
     experiment_folder.mkdir(parents=True)
 
@@ -72,30 +70,40 @@ def cost(x):
     """Cost function for the planner. x is a two dimensional state vector."""
     return np.linalg.norm(x - goal) + 30*scipy.stats.multivariate_normal.pdf(x, mean=obstacle, cov=0.4*np.eye(2))
 
-X, Y = np.meshgrid(np.linspace(-1, 11, 100), np.linspace(-1, 11, 100))
-z = np.array([cost(np.array([x,y])) for x,y in zip(np.ravel(X), np.ravel(Y))])
-Z = z.reshape(X.shape)
-grad = np.gradient(Z)
-ax = plt.figure().add_subplot(projection='3d')
-ax.plot_surface(X, Y, Z)
-ax = plt.figure().add_subplot()
-ax.quiver(X, Y, -grad[1], -grad[0], angles='xy')
 
-G = nx.generators.grid_2d_graph(100, 100)
+def cost_3d_plot(cost_function):
+    X, Y = np.meshgrid(np.linspace(-1, 11, 100), np.linspace(-1, 11, 100))
+    z = np.array([cost_function(np.array([x,y])) for x,y in zip(np.ravel(X), np.ravel(Y))])
+    Z = z.reshape(X.shape)
+    grad = np.gradient(Z)
+    ax = plt.figure().add_subplot(projection='3d')
+    ax.plot_surface(X, Y, Z)
+    ax = plt.figure().add_subplot()
+    ax.quiver(X, Y, -grad[1], -grad[0], angles='xy')
 
-print("Adding weights")
-for source,dest,data_dict in G.edges(data=True):
-    data_dict['weight'] = cost(np.array([dest[0]/10.0, dest[1]/10.0]))
-def dist(a, b):
-    (x1, y1) = a
-    (x2, y2) = b
-    x1/=10.0
-    y1/=10.0
-    x2/=10.0
-    y2/=10.0
-    return ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
-path = nx.astar_path(G, (0, 0), (99, 99), heuristic=dist, weight="weight")
-path_arr = np.array(path) * 0.1
+cost_3d_plot(cost)
+
+def get_path(starting_point, goal_point, cost_func, extreme_points=np.array([[0.0,0.0],[10.0,10.0]]), n_bins = 100):
+    space_lengths = extreme_points[1] - extreme_points[0]
+    step_sizes = space_lengths / n_bins
+    starting_node = tuple(np.floor(starting_point / step_sizes).astype(int))
+    goal_node = tuple(np.floor(goal_point / step_sizes).astype(int))
+    G = nx.generators.grid_2d_graph(n_bins+1, n_bins+1)
+    for source,dest,data_dict in G.edges(data=True):
+        data_dict['weight'] = cost_func(np.array([dest[0]*step_sizes[0], dest[1]*step_sizes[1]]))
+    def dist(a, b):
+        (x1, y1) = a
+        (x2, y2) = b
+        x1 *= step_sizes[0]
+        y1 *= step_sizes[1]
+        x2 *= step_sizes[0]
+        y2 *= step_sizes[1]
+        return ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
+    path = nx.astar_path(G, starting_node, goal_node, heuristic=dist, weight="weight")
+    path_arr = np.array(path) * step_sizes
+    return path_arr
+
+path_arr = get_path(np.array([0.0,0.0]), np.array([10.0,10.0]), cost)
 
 # Plot path as line
 plt.plot(path_arr[:,0], path_arr[:,1])
@@ -106,15 +114,17 @@ plt.plot(path_arr[:,0], path_arr[:,1])
 #     path_xy[p[0], p[1]] = 1
 # path_xy = cv2.dilate(path_xy, np.ones((3,3), np.uint8))
 # plt.imshow(path_xy, origin='lower')
-t = np.arange(path_arr.shape[0])
-fit_x = np.polynomial.polynomial.Polynomial.fit(t, path_arr[:,0], 10)
-fit_y = np.polynomial.polynomial.Polynomial.fit(t, path_arr[:,1], 10)
-fit_x_d = fit_x.deriv()
-fit_y_d = fit_y.deriv()
+def fit_polynomial(path_arr, degree=10):
+    t = np.arange(path_arr.shape[0])
+    fit_x = np.polynomial.polynomial.Polynomial.fit(t, path_arr[:,0], degree)
+    fit_y = np.polynomial.polynomial.Polynomial.fit(t, path_arr[:,1], degree)
+    fit_x_d = fit_x.deriv()
+    fit_y_d = fit_y.deriv()
+    return t, fit_x, fit_y, fit_x_d, fit_y_d
+t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
 plt.plot(fit_x(t), fit_y(t))
 
 def closest_point_on_path(x):
-    print(f"Finding closest point to {x}")
     x = np.array(x)
     dist = np.linalg.norm(np.stack((fit_x(t) - x[0], fit_y(t) - x[1]), axis=-1), axis=-1)
     min_index = np.argmin(dist)
@@ -126,7 +136,6 @@ def crowdsourcing_cost(x,y,forward_vector):
     x = np.array([x,y])
     closest_point, crosstrack_error, tangent_vector = closest_point_on_path(x)
     orientation_error = (np.dot(forward_vector, tangent_vector)-1)**2
-    print(f"crosstrack error: {crosstrack_error}, orientation error: {orientation_error}")
     return crosstrack_error + 10*orientation_error
 
 def get_crowdsourcing_costs(data):
@@ -210,4 +219,4 @@ with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() a
             print(np.asarray([data.time]).shape, np.array(data.qpos).shape, np.array(data.qvel).shape)
             TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
         TRAJ = np.stack(TRAJ)
-        np.save("traj.npy", TRAJ)
+        np.save(experiment_folder / "traj.npy", TRAJ)
