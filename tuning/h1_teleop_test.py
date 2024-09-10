@@ -5,12 +5,38 @@ import mujoco
 import mujoco.viewer
 import mediapy as media
 import numpy as np
+import pandas as pd
 import pathlib
 import scipy
 import time
 from concurrent.futures import ThreadPoolExecutor
 from mujoco_mpc import agent as agent_lib
 import scipy.stats
+
+def get_experiment_file():
+    experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / "h1_teleop_experiments" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if not experiment_folder.exists():
+        experiment_folder.mkdir(parents=True)
+    return experiment_folder / "data.csv"
+
+def log_data_point(experiment_file, data, command, data_cache):
+    fw = quat_to_forward_vector(data.qpos[3:7])
+    theta = np.arctan2(fw[1], fw[0])
+    row = {
+        'time': data.time,
+        'command': command,
+        'x': data.qpos[0],
+        'y': data.qpos[1],
+        'theta': theta,
+        'vx': data.qvel[0],
+        'vy': data.qvel[1],
+        'omega': data.qvel[5],
+    }
+    data_cache.append(row)
+    if len(data_cache) >= 1000:
+        df = pd.DataFrame(data_cache)
+        df.to_csv(experiment_file, mode='a', header=not experiment_file.exists(), index=False)
+        data_cache.clear()
 
 def init_pygame():
     pygame.init()
@@ -126,7 +152,10 @@ if __name__ == "__main__":
                         server_binary_path=pathlib.Path(agent_lib.__file__).parent
                         / "mjpc"
                         / "agent_server")
-    agent.set_cost_weights({'Posture arms': 0.04, 'Posture torso': 0.1, 'Face goal': 4.0})
+    agent.set_cost_weights({'Posture arms': 0.06, 'Posture torso': 0.05, 'Face goal': 4.0})
+    experiment_file = get_experiment_file()
+    data_cache = []
+    log_data_point(experiment_file, data, None, data_cache)
     i=0
     steps_per_planning_iteration = 10
     init_pygame()
@@ -135,8 +164,6 @@ if __name__ == "__main__":
             command = pygame_handle_events()
             if command == "RESET":
                 mujoco.mj_resetData(model, data)
-            if command is not None:
-                print(command)
             data.mocap_pos, data.mocap_quat = get_mocap_reference_3(data, command)
             agent.set_state(
                 time=data.time,
@@ -152,6 +179,7 @@ if __name__ == "__main__":
             data.ctrl = agent.get_action(nominal_action=True)
             mujoco.mj_step(model, data)
             viewer.sync()
+            log_data_point(experiment_file, data, command, data_cache)
             i = i + 1
         pygame.quit()
         exit()
