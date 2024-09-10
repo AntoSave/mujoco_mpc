@@ -7,6 +7,7 @@ import networkx as nx
 import numpy as np
 import cv2
 import pathlib
+import pickle
 import scipy
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -22,25 +23,14 @@ model.opt.timestep = 0.002
 # data
 data = mujoco.MjData(model)
 # agents
-agent_forward = agent_lib.Agent(task_id="H1 Walk", 
+agent = agent_lib.Agent(task_id="H1 Walk", 
                         model=model, 
                         server_binary_path=pathlib.Path(agent_lib.__file__).parent
                         / "mjpc"
                         / "agent_server")
-agent_right = agent_lib.Agent(task_id="H1 Walk",
-                          model=model,
-                            server_binary_path=pathlib.Path(agent_lib.__file__).parent
-                            / "mjpc"
-                            / "agent_server")
-agent_left = agent_lib.Agent(task_id="H1 Walk",
-                          model=model,
-                            server_binary_path=pathlib.Path(agent_lib.__file__).parent
-                            / "mjpc"
-                            / "agent_server")
 # agent_x.set_cost_weights({'Face goal':0.0, 'Posture up': 0.1})
 # agent_y.set_cost_weights({'Face goal':0.0, 'Posture up': 0.1})
-for agent in [agent_forward, agent_right, agent_left]:
-    agent.set_cost_weights({'Posture up': 0.1})
+agent.set_cost_weights({'Posture arms': 0.06, 'Posture torso': 0.05, 'Face goal': 4.0})
 
 # Experiment info
 current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -124,85 +114,87 @@ fit_y_d = fit_y.deriv()
 plt.plot(fit_x(t), fit_y(t))
 
 def closest_point_on_path(x):
+    print(f"Finding closest point to {x}")
     x = np.array(x)
     dist = np.linalg.norm(np.stack((fit_x(t) - x[0], fit_y(t) - x[1]), axis=-1), axis=-1)
     min_index = np.argmin(dist)
     tangent_vector = np.array([fit_x_d(min_index), fit_y_d(min_index)])
     tangent_vector /= np.linalg.norm(tangent_vector)
-    return np.argmin(dist), dist, tangent_vector
+    return np.argmin(dist), dist[min_index], tangent_vector
 
 def crowdsourcing_cost(x,y,forward_vector):
     x = np.array([x,y])
-    closest_point, dist, tangent_vector = closest_point_on_path(x)
-    fw_point = np.array([fit_x(closest_point), fit_y(closest_point)]) + 0.5 * forward_vector
-    return dist + np.linalg.norm(x-fw_point) + 100 * np.dot(forward_vector, tangent_vector)
+    closest_point, crosstrack_error, tangent_vector = closest_point_on_path(x)
+    orientation_error = (np.dot(forward_vector, tangent_vector)-1)**2
+    print(f"crosstrack error: {crosstrack_error}, orientation error: {orientation_error}")
+    return crosstrack_error + 10*orientation_error
+
+def get_crowdsourcing_costs(data):
+    fw = quat_to_forward_vector(data.qpos[3:7])
+    fw_left = quat_to_forward_vector(rotate_quat(data.qpos[3:7], np.pi/16))
+    fw_right = quat_to_forward_vector(rotate_quat(data.qpos[3:7], -np.pi/16))
+    future_pos = data.qpos[:2] + 0.1 * fw
+    future_pos_left = data.qpos[:2] + 0.1 * fw_left
+    future_pos_right = data.qpos[:2] + 0.1 * fw_right
+    costs = {}
+    costs["FORWARD"] = crowdsourcing_cost(future_pos[0], future_pos[1], fw)
+    costs["LEFT"] = crowdsourcing_cost(future_pos_left[0], future_pos_left[1], fw_left)
+    costs["RIGHT"] = crowdsourcing_cost(future_pos_right[0], future_pos_right[1], fw_right)
+    print(costs)
+    return costs
+
+def get_crowdsourcing_costs_prob(models, data):
+    def get_policy_cost(policy):
+        curr_vels = data.qvel[:3]
+        samples = np.random.multivariate_normal(np.dot(models[policy]['coeffs'], np.append(curr_vels, 1)), models[policy]['cov'], 100)
+        future_pos = data.qpos[:2] + 0.002 * samples[:,:2]
+        fw_vectors = [quat_to_forward_vector(rotate_quat(data.qpos[3:7], angle)) for angle in samples[:,2]*0.002]
+        cost_samples = [crowdsourcing_cost(x[0][0], x[0][1], x[1]) for x in zip(future_pos, fw_vectors)]
+        return np.mean(cost_samples)
+    costs = {policy: get_policy_cost(policy) for policy in models.keys()}
+    return costs
+
+def get_mocap_reference(data, command):
+    fw = quat_to_forward_vector(data.qpos[3:7])
+    pos_ref = data.qpos[:3]
+    quat_ref = data.qpos[3:7]
+    if command == "FORWARD":
+        pos_ref = pos_ref + np.concatenate([fw, [0]])
+    elif command == "LEFT":
+        fw = quat_to_forward_vector(rotate_quat(data.qpos[3:7], np.pi/4))
+        pos_ref = pos_ref + np.concatenate([fw, [0]])
+    elif command == "RIGHT":
+        fw = quat_to_forward_vector(rotate_quat(data.qpos[3:7], -np.pi/4))
+        pos_ref = pos_ref + np.concatenate([fw, [0]])
+    elif command == "BACKWARD":
+        pass
+    return pos_ref, quat_ref
 
 plt.show()
 input("Press Enter to continue...")
 
 TRAJ = []
+command = "FORWARD"
 
 with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() as executor:
     with media.VideoWriter(video_path, fps=video_fps, shape=video_resolution) as video:
+        models = pickle.load(open("/home/antonio/uni/tesi/mujoco_mpc/tuning/models_ols.pkl", "rb"))
         while viewer.is_running():
-            
-            forward_vector = np.concatenate([quat_to_forward_vector(data.qpos[3:7]), [0]])
-            
+            command_costs = get_crowdsourcing_costs_prob(models,data)
+            command = min(command_costs, key=command_costs.get)
+            data.mocap_pos, data.mocap_quat = get_mocap_reference(data, command)
             # set planner state
-            agent_forward.set_state(
+            agent.set_state(
                 time=data.time,
                 qpos=data.qpos,
                 qvel=data.qvel,
                 act=data.act,
-                mocap_pos=data.qpos[:3] + forward_vector * 10.0,
-                mocap_quat=data.qpos[3:7],
+                mocap_pos=data.mocap_pos,
+                mocap_quat=data.mocap_quat,
                 userdata=data.userdata,
             )
-            agent_left.set_state(
-                time=data.time,
-                qpos=data.qpos,
-                qvel=data.qvel,
-                act=data.act,
-                mocap_pos=data.qpos[:3],
-                mocap_quat=rotate_quat(data.qpos[3:7], np.pi/2),
-                userdata=data.userdata,
-            )
-            agent_right.set_state(
-                time=data.time,
-                qpos=data.qpos,
-                qvel=data.qvel,
-                act=data.act,
-                mocap_pos=data.qpos[:3],
-                mocap_quat=rotate_quat(data.qpos[3:7], -np.pi/2),
-                userdata=data.userdata,
-            )
-            
-            if i % steps_per_planning_iteration == 0:
-                t = time.time()
-                f1 = executor.submit(plan_and_get_trajectory, agent_forward)
-                f2 = executor.submit(plan_and_get_trajectory, agent_left)
-                f3 = executor.submit(plan_and_get_trajectory, agent_right)
-                traj1 = f1.result()
-                traj2 = f2.result()
-                traj3 = f3.result()
-                elapsed = time.time() - t
-                print("Elapsed planning time: ", elapsed)
-                traj1_states = traj1["states"]
-                traj2_states = traj2["states"]
-                traj3_states = traj3["states"]
-                #euler distance from goal
-                traj1_goal_distance = crowdsourcing_cost(traj1_states[-1,0], traj1_states[-1,1], quat_to_forward_vector(traj1_states[-1,3:7]))
-                traj2_goal_distance = crowdsourcing_cost(traj2_states[-1,0], traj2_states[-1,1], quat_to_forward_vector(traj2_states[-1,3:7]))
-                traj3_goal_distance = crowdsourcing_cost(traj3_states[-1,0], traj3_states[-1,1], quat_to_forward_vector(traj3_states[-1,3:7]))
-                current_agent = np.argmin([traj1_goal_distance, traj2_goal_distance, traj3_goal_distance])
-
-            if current_agent == 0:
-                agent = agent_forward
-            elif current_agent == 1:
-                agent = agent_left
-            else:
-                agent = agent_right
-            data.ctrl = agent.get_action(nominal_action=True)
+            agent.planner_step()
+            data.ctrl = agent.get_action(nominal_action=False)
             mujoco.mj_step(model, data)
             print(f"Step {i} state: {data.qpos}")
             viewer.sync()
