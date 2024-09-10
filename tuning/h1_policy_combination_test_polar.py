@@ -27,9 +27,12 @@ def rotate_quat(quat, angle):
     r = r * scipy.spatial.transform.Rotation.from_euler('z', angle)
     return r.as_quat(canonical=True, scalar_first=True)
 
-def cost(x):
+def cost(x, goal=np.array([10.0, 10.0]), obstacles=np.array([[3.0, 3.0]])):
     """Cost function for the planner. x is a two dimensional state vector."""
-    return np.linalg.norm(x - goal) + 30*scipy.stats.multivariate_normal.pdf(x, mean=obstacle, cov=0.4*np.eye(2))
+    c = np.linalg.norm(x - goal)
+    for o in obstacles:
+        c += 30*scipy.stats.multivariate_normal.pdf(x, mean=o, cov=0.4*np.eye(2))
+    return c
 
 def export_cost_plots(cost_function, directory_path = pathlib.Path(__file__).parent):
     X, Y = np.meshgrid(np.linspace(-1, 11, 100), np.linspace(-1, 11, 100))
@@ -173,12 +176,17 @@ if __name__ == "__main__":
     steps_per_planning_iteration = 10
     i = 0
     goal = np.array([10.0, 10.0])
-    obstacle = np.array([3.0, 3.0])
+    obstacles = np.array([[3.0, 3.0]])
+    cost_function = lambda x: cost(x, goal=goal, obstacles=obstacles)
     
-    path_arr = get_path(np.array([0.0,0.0]), np.array([10.0,10.0]), cost)
+    
+    path_arr = get_path(np.array([0.0,0.0]), np.array([10.0,10.0]), cost_function)
     t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
     
-    _, fig_grad = export_cost_plots(cost, experiment_folder)
+    path_data = {"path": path_arr, "fit_x": fit_x, "fit_y": fit_y, "fit_x_d": fit_x_d, "fit_y_d": fit_y_d, "t": t, "goal": goal, "obstacles": obstacles}
+    pickle.dump(path_data, open(experiment_folder / "path_data.pkl", "wb"))
+    
+    _, fig_grad = export_cost_plots(cost_function, experiment_folder)
     fig_grad.axes[0].plot(path_arr[:,0], path_arr[:,1])
     fig_grad.axes[0].plot(fit_x(t), fit_y(t))
     fig_grad.savefig(experiment_folder / "path.png")
