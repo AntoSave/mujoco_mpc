@@ -14,45 +14,6 @@ from concurrent.futures import ThreadPoolExecutor
 from mujoco_mpc import agent as agent_lib
 import scipy.stats
 
-model_path = (
-        pathlib.Path(__file__).parent
-        / "../build/mjpc/tasks/h1/walk/task.xml"
-    )
-model = mujoco.MjModel.from_xml_path(str(model_path))
-model.opt.timestep = 0.002
-# data
-data = mujoco.MjData(model)
-# agents
-agent = agent_lib.Agent(task_id="H1 Walk", 
-                        model=model, 
-                        server_binary_path=pathlib.Path(agent_lib.__file__).parent
-                        / "mjpc"
-                        / "agent_server")
-agent.set_cost_weights({'Posture arms': 0.06, 'Posture torso': 0.05, 'Face goal': 4.0})
-
-# Experiment info
-current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-experiment_name = f"h1_walk_{current_datetime}"
-experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / "relative_policy_combination" / experiment_name
-if not experiment_folder.exists():
-    experiment_folder.mkdir(parents=True)
-
-# Video
-video_fps = 60
-video_resolution = (720, 1280)
-frame_count = 0
-
-video_path = experiment_folder / f"h1_walk_{current_datetime}.mp4"
-if not video_path.parent.exists():
-    video_path.parent.mkdir()
-renderer = mujoco.Renderer(model, height=video_resolution[0], width=video_resolution[1])
-
-current_agent = 0
-steps_per_planning_iteration = 10
-i = 0
-goal = np.array([10.0, 10.0])
-obstacle = np.array([3.0, 3.0])
-
 def plan_and_get_trajectory(agent):
     for _ in range(10):
         agent.planner_step()
@@ -70,18 +31,20 @@ def cost(x):
     """Cost function for the planner. x is a two dimensional state vector."""
     return np.linalg.norm(x - goal) + 30*scipy.stats.multivariate_normal.pdf(x, mean=obstacle, cov=0.4*np.eye(2))
 
-
-def cost_3d_plot(cost_function):
+def export_cost_plots(cost_function, directory_path = pathlib.Path(__file__).parent):
     X, Y = np.meshgrid(np.linspace(-1, 11, 100), np.linspace(-1, 11, 100))
     z = np.array([cost_function(np.array([x,y])) for x,y in zip(np.ravel(X), np.ravel(Y))])
     Z = z.reshape(X.shape)
     grad = np.gradient(Z)
-    ax = plt.figure().add_subplot(projection='3d')
+    fig_3d = plt.figure()
+    ax = fig_3d.add_subplot(projection='3d')
     ax.plot_surface(X, Y, Z)
-    ax = plt.figure().add_subplot()
+    fig_3d.savefig(directory_path / "cost_3d.png")
+    fig_grad = plt.figure()
+    ax = fig_grad.add_subplot()
     ax.quiver(X, Y, -grad[1], -grad[0], angles='xy')
-
-cost_3d_plot(cost)
+    fig_grad.savefig(directory_path / "cost_3d_grad.png")
+    return fig_3d, fig_grad
 
 def get_path(starting_point, goal_point, cost_func, extreme_points=np.array([[0.0,0.0],[10.0,10.0]]), n_bins = 100):
     space_lengths = extreme_points[1] - extreme_points[0]
@@ -103,11 +66,6 @@ def get_path(starting_point, goal_point, cost_func, extreme_points=np.array([[0.
     path_arr = np.array(path) * step_sizes
     return path_arr
 
-path_arr = get_path(np.array([0.0,0.0]), np.array([10.0,10.0]), cost)
-
-# Plot path as line
-plt.plot(path_arr[:,0], path_arr[:,1])
-
 # Plot path as heatmap
 # path_xy = np.zeros((100,100), dtype=np.uint8)
 # for p in path:
@@ -121,8 +79,6 @@ def fit_polynomial(path_arr, degree=10):
     fit_x_d = fit_x.deriv()
     fit_y_d = fit_y.deriv()
     return t, fit_x, fit_y, fit_x_d, fit_y_d
-t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
-plt.plot(fit_x(t), fit_y(t))
 
 def closest_point_on_path(x):
     x = np.array(x)
@@ -179,44 +135,91 @@ def get_mocap_reference(data, command):
         pass
     return pos_ref, quat_ref
 
-plt.show()
-input("Press Enter to continue...")
+if __name__ == "__main__":
+    model_path = (
+        pathlib.Path(__file__).parent
+        / "../build/mjpc/tasks/h1/walk/task.xml"
+    )
+    model = mujoco.MjModel.from_xml_path(str(model_path))
+    model.opt.timestep = 0.002
+    # data
+    data = mujoco.MjData(model)
+    # agents
+    agent = agent_lib.Agent(task_id="H1 Walk", 
+                            model=model, 
+                            server_binary_path=pathlib.Path(agent_lib.__file__).parent
+                            / "mjpc"
+                            / "agent_server")
+    agent.set_cost_weights({'Posture arms': 0.06, 'Posture torso': 0.05, 'Face goal': 4.0})
 
-TRAJ = []
-command = "FORWARD"
+    # Experiment info
+    current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    experiment_name = f"h1_walk_{current_datetime}"
+    experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / "relative_policy_combination" / experiment_name
+    if not experiment_folder.exists():
+        experiment_folder.mkdir(parents=True)
 
-with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() as executor:
-    with media.VideoWriter(video_path, fps=video_fps, shape=video_resolution) as video:
-        models = pickle.load(open("/home/antonio/uni/tesi/mujoco_mpc/tuning/models_ols.pkl", "rb"))
-        while viewer.is_running():
-            command_costs = get_crowdsourcing_costs_prob(models,data)
-            command = min(command_costs, key=command_costs.get)
-            data.mocap_pos, data.mocap_quat = get_mocap_reference(data, command)
-            # set planner state
-            agent.set_state(
-                time=data.time,
-                qpos=data.qpos,
-                qvel=data.qvel,
-                act=data.act,
-                mocap_pos=data.mocap_pos,
-                mocap_quat=data.mocap_quat,
-                userdata=data.userdata,
-            )
-            agent.planner_step()
-            data.ctrl = agent.get_action(nominal_action=False)
-            mujoco.mj_step(model, data)
-            print(f"Step {i} state: {data.qpos}")
-            viewer.sync()
-            
-            # Render video
-            if frame_count < data.time * video_fps:
-                renderer.update_scene(data, camera="top")
-                pixels = renderer.render()
-                video.add_image(pixels)
-                frame_count += 1
-            
-            i = i + 1
-            print(np.asarray([data.time]).shape, np.array(data.qpos).shape, np.array(data.qvel).shape)
-            TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
-        TRAJ = np.stack(TRAJ)
-        np.save(experiment_folder / "traj.npy", TRAJ)
+    # Video
+    video_fps = 60
+    video_resolution = (720, 1280)
+    frame_count = 0
+
+    video_path = experiment_folder / f"h1_walk_{current_datetime}.mp4"
+    if not video_path.parent.exists():
+        video_path.parent.mkdir()
+    renderer = mujoco.Renderer(model, height=video_resolution[0], width=video_resolution[1])
+
+    current_agent = 0
+    steps_per_planning_iteration = 10
+    i = 0
+    goal = np.array([10.0, 10.0])
+    obstacle = np.array([3.0, 3.0])
+    
+    path_arr = get_path(np.array([0.0,0.0]), np.array([10.0,10.0]), cost)
+    t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
+    
+    _, fig_grad = export_cost_plots(cost, experiment_folder)
+    fig_grad.axes[0].plot(path_arr[:,0], path_arr[:,1])
+    fig_grad.axes[0].plot(fit_x(t), fit_y(t))
+    fig_grad.savefig(experiment_folder / "path.png")
+    
+    input("Press Enter to continue...")
+
+    TRAJ = []
+    command = "FORWARD"
+
+    with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() as executor:
+        with media.VideoWriter(video_path, fps=video_fps, shape=video_resolution) as video:
+            models = pickle.load(open("/home/antonio/uni/tesi/mujoco_mpc/tuning/models_ols.pkl", "rb"))
+            while viewer.is_running():
+                command_costs = get_crowdsourcing_costs_prob(models,data)
+                command = min(command_costs, key=command_costs.get)
+                data.mocap_pos, data.mocap_quat = get_mocap_reference(data, command)
+                # set planner state
+                agent.set_state(
+                    time=data.time,
+                    qpos=data.qpos,
+                    qvel=data.qvel,
+                    act=data.act,
+                    mocap_pos=data.mocap_pos,
+                    mocap_quat=data.mocap_quat,
+                    userdata=data.userdata,
+                )
+                agent.planner_step()
+                data.ctrl = agent.get_action(nominal_action=False)
+                mujoco.mj_step(model, data)
+                print(f"Step {i} state: {data.qpos}")
+                viewer.sync()
+                
+                # Render video
+                if frame_count < data.time * video_fps:
+                    renderer.update_scene(data, camera="top")
+                    pixels = renderer.render()
+                    video.add_image(pixels)
+                    frame_count += 1
+                
+                i = i + 1
+                print(np.asarray([data.time]).shape, np.array(data.qpos).shape, np.array(data.qvel).shape)
+                TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
+            TRAJ = np.stack(TRAJ)
+            np.save(experiment_folder / "traj.npy", TRAJ)
