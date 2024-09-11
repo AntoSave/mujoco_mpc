@@ -138,12 +138,31 @@ def get_mocap_reference(data, command):
         pass
     return pos_ref, quat_ref
 
+def add_obstacles(model_spec, obstacles):
+    for i, o in enumerate(obstacles):
+        body = model_spec.worldbody.add_body()
+        body.name = f"obstacle_{i}"
+        body.pos = o.tolist() + [0.5]
+        geom = body.add_geom()
+        geom.name = f"obstacle_geom_{i}"
+        geom.type = mujoco.mjtGeom.mjGEOM_CYLINDER
+        geom.size = [0.8, 0.8, 0.5]
+        geom.rgba = [1, 0, 0, 1]
+
 if __name__ == "__main__":
+    goal = np.array([10.0, 10.0])
+    obstacles = np.array([[3.0, 3.0], [5.0, 5.0]])
+    cost_function = lambda x: cost(x, goal=goal, obstacles=obstacles)
+    
     model_path = (
         pathlib.Path(__file__).parent
         / "../build/mjpc/tasks/h1/walk/task.xml"
     )
-    model = mujoco.MjModel.from_xml_path(str(model_path))
+    #model = mujoco.MjModel.from_xml_path(str(model_path))
+    model_spec = mujoco.MjSpec()
+    model_spec.from_file(str(model_path))
+    add_obstacles(model_spec, obstacles)
+    model = model_spec.compile()
     model.opt.timestep = 0.002
     # data
     data = mujoco.MjData(model)
@@ -175,10 +194,6 @@ if __name__ == "__main__":
     current_agent = 0
     steps_per_planning_iteration = 10
     i = 0
-    goal = np.array([10.0, 10.0])
-    obstacles = np.array([[3.0, 3.0]])
-    cost_function = lambda x: cost(x, goal=goal, obstacles=obstacles)
-    
     
     path_arr = get_path(np.array([0.0,0.0]), np.array([10.0,10.0]), cost_function)
     t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
@@ -216,7 +231,6 @@ if __name__ == "__main__":
                 agent.planner_step()
                 data.ctrl = agent.get_action(nominal_action=False)
                 mujoco.mj_step(model, data)
-                print(f"Step {i} state: {data.qpos}")
                 viewer.sync()
                 
                 # Render video
@@ -227,7 +241,6 @@ if __name__ == "__main__":
                     frame_count += 1
                 
                 i = i + 1
-                print(np.asarray([data.time]).shape, np.array(data.qpos).shape, np.array(data.qvel).shape)
                 TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
             TRAJ = np.stack(TRAJ)
             np.save(experiment_folder / "traj.npy", TRAJ)
