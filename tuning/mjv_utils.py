@@ -49,8 +49,8 @@ class GeomManager:
         self.scene.ngeom += 1
         return geom
     
-    def add_point(self, geom_rgba = [1, 0, 0, 1]):
-        geom = Point(self.scene.ngeom, geom_rgba)
+    def add_point(self, geom_rgba = [1, 0, 0, 1], geom_size=0.025):
+        geom = Point(self.scene.ngeom, geom_rgba, size=geom_size)
         return self.add_geom(geom)
     
     def add_line(self, geom_rgba = [1, 0, 0, 1]):
