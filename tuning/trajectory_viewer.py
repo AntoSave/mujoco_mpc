@@ -165,7 +165,7 @@ class TrajectoryViewer:
         while True:
             window._update_images()
             #window._debug_print()
-            time.sleep(0.02)
+            time.sleep(0.002)
        
 if __name__ == "__main__":
     model_path = (
@@ -173,55 +173,56 @@ if __name__ == "__main__":
         / "../build/mjpc/tasks/h1/walk/task.xml"
     )
     model = mujoco.MjModel.from_xml_path(str(model_path))
-    data = mujoco.MjData(model)
-    data.qpos = [ 0.02762667,  0.13404553,  1.05540741,  0.99795042, -0.06369025,  0.00204179, 
-    -0.00585946,  0.42735359,  0.00819075,  0.08080127, -0.05984312, -0.11663226, 
-    0.13752153,  0.18018916, -1.07652994,  1.69882327, -0.62080289, -0.1733220, 
-    -0.07675962,  0.07708435,  0.0069074,  -0.01577377,  0.03256376,  0.0832239,
-    0.00685365, -0.01660792 ]
-    agent = agent_lib.Agent(task_id="H1 Walk", 
-                        model=model, 
-                        server_binary_path=pathlib.Path(agent_lib.__file__).parent
-                        / "mjpc"
-                        / "agent_server")
-    agent.set_state(
-        time=data.time,
-        qpos=data.qpos,
-        qvel=data.qvel,
-        act=data.act,
-        mocap_pos=np.asarray([10.0, 0.0, 0.25]),
-        mocap_quat=data.mocap_quat,
-        userdata=data.userdata,
-    )
-    for i in range(1):
-        cost = agent.get_total_cost()
-        print(f"Cost: {cost}")
-        agent.planner_step()
+    # data = mujoco.MjData(model)
+    # data.qpos = [ 0.02762667,  0.13404553,  1.05540741,  0.99795042, -0.06369025,  0.00204179, 
+    # -0.00585946,  0.42735359,  0.00819075,  0.08080127, -0.05984312, -0.11663226, 
+    # 0.13752153,  0.18018916, -1.07652994,  1.69882327, -0.62080289, -0.1733220, 
+    # -0.07675962,  0.07708435,  0.0069074,  -0.01577377,  0.03256376,  0.0832239,
+    # 0.00685365, -0.01660792 ]
+    # agent = agent_lib.Agent(task_id="H1 Walk", 
+    #                     model=model, 
+    #                     server_binary_path=pathlib.Path(agent_lib.__file__).parent
+    #                     / "mjpc"
+    #                     / "agent_server")
+    # agent.set_state(
+    #     time=data.time,
+    #     qpos=data.qpos,
+    #     qvel=data.qvel,
+    #     act=data.act,
+    #     mocap_pos=np.asarray([10.0, 0.0, 0.25]),
+    #     mocap_quat=data.mocap_quat,
+    #     userdata=data.userdata,
+    # )
+    # for i in range(1):
+    #     cost = agent.get_total_cost()
+    #     print(f"Cost: {cost}")
+    #     agent.planner_step()
         
-    traj = agent.best_trajectory()["states"]
-    traj = traj[:, :model.nq]
-    agent.set_state(
-        time=data.time,
-        qpos=data.qpos,
-        qvel=data.qvel,
-        act=data.act,
-        mocap_pos=np.asarray([10.0, 0.0, 0.25]),
-        mocap_quat=data.mocap_quat,
-        userdata=data.userdata,
-    )
-    for i in range(10):
-        t = time.time()
-        agent.planner_step()
-        print(f"Time taken: {time.time() - t}")
+    # traj = agent.best_trajectory()["states"]
+    # traj = traj[:, :model.nq]
+    # agent.set_state(
+    #     time=data.time,
+    #     qpos=data.qpos,
+    #     qvel=data.qvel,
+    #     act=data.act,
+    #     mocap_pos=np.asarray([10.0, 0.0, 0.25]),
+    #     mocap_quat=data.mocap_quat,
+    #     userdata=data.userdata,
+    # )
+    # for i in range(10):
+    #     t = time.time()
+    #     agent.planner_step()
+    #     print(f"Time taken: {time.time() - t}")
         
-    traj2 = agent.best_trajectory()["states"]
-    traj2 = traj2[:, :model.nq]
-    print(traj.shape)
-    # traj = np.load("traj.npy")
-    # print(traj[0])
-    # print(traj[-1])
+    # traj2 = agent.best_trajectory()["states"]
+    # traj2 = traj2[:, :model.nq]
+    # print(traj.shape)
+    traj = np.load("/home/antonio/uni/tesi/mujoco_mpc/experiments/h1_teleop_experiments/absolute_primitives_demo/traj.npy")[:, 1:model.nq+1]
+    
+    traj1 = traj[100:427, :]
+    traj2 = traj[460:799, :]
     traj_viewer = TrajectoryViewer(shape=(1,2))
-    view = traj_viewer.add_view(model_path, trajectory=traj, camera_name="top", width=500, height=500)
-    view2 = traj_viewer.add_view(model_path, trajectory=traj2, camera_name="top", width=500, height=500)
+    view = traj_viewer.add_view(model_path, trajectory=traj1, camera_name="top", width=1000, height=720)
+    view2 = traj_viewer.add_view(model_path, trajectory=traj2, camera_name="top", width=1000, height=720)
     traj_viewer.start()
     traj_viewer.join()
