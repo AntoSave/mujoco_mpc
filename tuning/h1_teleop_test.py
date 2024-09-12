@@ -13,11 +13,11 @@ from concurrent.futures import ThreadPoolExecutor
 from mujoco_mpc import agent as agent_lib
 import scipy.stats
 
-def get_experiment_file():
+def get_experiment_folder():
     experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / "h1_teleop_experiments" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if not experiment_folder.exists():
         experiment_folder.mkdir(parents=True)
-    return experiment_folder / "data.csv"
+    return experiment_folder 
 
 def log_data_point(experiment_file, data, command, data_cache):
     fw = quat_to_forward_vector(data.qpos[3:7])
@@ -140,6 +140,7 @@ def get_mocap_reference_4(data, command):
     
 
 if __name__ == "__main__":
+    # Model and agent initialization
     model_path = (
         pathlib.Path(__file__).parent
         / "../build/mjpc/tasks/h1/walk/task.xml"
@@ -153,33 +154,65 @@ if __name__ == "__main__":
                         / "mjpc"
                         / "agent_server")
     agent.set_cost_weights({'Posture arms': 0.06, 'Posture torso': 0.05, 'Face goal': 4.0})
-    experiment_file = get_experiment_file()
+    # Video rendering
+    current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    experiment_folder = get_experiment_folder()
+    experiment_file = experiment_folder / "data.csv"
+    video_fps = 60
+    video_resolution = (720, 1280)
+    frame_count = 0
+    video_path = experiment_folder / f"h1_walk_{current_datetime}.mp4"
+    if not video_path.parent.exists():
+        video_path.parent.mkdir()
+    renderer = mujoco.Renderer(model, height=video_resolution[0], width=video_resolution[1])
+    # Experiment data logging
     data_cache = []
+    TRAJ = []
     log_data_point(experiment_file, data, None, data_cache)
+    # Planning settings
     i=0
     steps_per_planning_iteration = 10
     init_pygame()
     with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() as executor:
-        while viewer.is_running():
-            command = pygame_handle_events()
-            if command == "RESET":
-                mujoco.mj_resetData(model, data)
-            data.mocap_pos, data.mocap_quat = get_mocap_reference_3(data, command)
-            agent.set_state(
-                time=data.time,
-                qpos=data.qpos,
-                qvel=data.qvel,
-                act=data.act,
-                mocap_pos=data.mocap_pos,
-                mocap_quat=data.mocap_quat,
-                userdata=data.userdata,
-            )
-            if i % steps_per_planning_iteration == 0:
-                trajectory = plan_and_get_trajectory(agent)
-            data.ctrl = agent.get_action(nominal_action=True)
-            mujoco.mj_step(model, data)
-            viewer.sync()
-            log_data_point(experiment_file, data, command, data_cache)
-            i = i + 1
-        pygame.quit()
-        exit()
+        with media.VideoWriter(video_path, fps=video_fps, shape=video_resolution) as video:
+            while viewer.is_running():
+                # Get command from user
+                command = pygame_handle_events()
+                if command == "RESET":
+                    curr_time = data.time
+                    mujoco.mj_resetData(model, data)
+                    data.time = curr_time
+                data.mocap_pos, data.mocap_quat = get_mocap_reference_3(data, command)
+                
+                # Planning and control
+                agent.set_state(
+                    time=data.time,
+                    qpos=data.qpos,
+                    qvel=data.qvel,
+                    act=data.act,
+                    mocap_pos=data.mocap_pos,
+                    mocap_quat=data.mocap_quat,
+                    userdata=data.userdata,
+                )
+                if i % steps_per_planning_iteration == 0:
+                    trajectory = plan_and_get_trajectory(agent)
+                data.ctrl = agent.get_action(nominal_action=True)
+                mujoco.mj_step(model, data)
+                i = i + 1
+                
+                # Render video
+                if frame_count < data.time * video_fps:
+                    renderer.update_scene(data, camera="top")
+                    pixels = renderer.render()
+                    video.add_image(pixels)
+                    frame_count += 1
+                
+                # Synchonize viewer, log data point
+                viewer.sync()
+                log_data_point(experiment_file, data, command, data_cache)
+                if i%10 == 0:
+                    TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
+            TRAJ = np.stack(TRAJ)
+            np.save(experiment_folder / "traj.npy", TRAJ)
+            pygame.quit()
+            exit()
