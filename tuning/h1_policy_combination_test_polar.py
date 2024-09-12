@@ -83,21 +83,31 @@ def fit_polynomial(path_arr, degree=10):
     fit_y_d = fit_y.deriv()
     return t, fit_x, fit_y, fit_x_d, fit_y_d
 
-def closest_point_on_path(x):
-    x = np.array(x)
-    dist = np.linalg.norm(np.stack((fit_x(t) - x[0], fit_y(t) - x[1]), axis=-1), axis=-1)
-    min_index = np.argmin(dist)
-    tangent_vector = np.array([fit_x_d(min_index), fit_y_d(min_index)])
-    tangent_vector /= np.linalg.norm(tangent_vector)
-    return np.argmin(dist), dist[min_index], tangent_vector
+def ARMA_filter(path, p = 3, q = 3):
+    smoothed_path = np.zeros_like(path)
+    for i, point in enumerate(path):
+        smoothed_path[i] = np.mean(path[max(0, i-p):min(i+q, path.shape[0])], axis=0)
+    return smoothed_path
 
-def crowdsourcing_cost(x,y,forward_vector):
+def path_tangent_vectors(path):
+    path_diff = np.diff(path, axis=0)
+    path_diff = path_diff / np.linalg.norm(path_diff, axis=1)[:,None]
+    return path_diff
+
+def closest_point_on_path(x, path, path_d):
+    x = np.array(x)
+    dist = np.linalg.norm(x-path, axis=-1)
+    min_index = np.argmin(dist)
+    tangent_vector = path_d[min_index]
+    return min_index, dist[min_index], tangent_vector
+
+def crowdsourcing_cost(x, y, forward_vector, path, path_d):
     x = np.array([x,y])
-    closest_point, crosstrack_error, tangent_vector = closest_point_on_path(x)
+    closest_point, crosstrack_error, tangent_vector = closest_point_on_path(x, path, path_d)
     orientation_error = (np.dot(forward_vector, tangent_vector)-1)**2
     return crosstrack_error + 10*orientation_error
 
-def get_crowdsourcing_costs(data):
+def get_crowdsourcing_costs(data, path, path_d):
     fw = quat_to_forward_vector(data.qpos[3:7])
     fw_left = quat_to_forward_vector(rotate_quat(data.qpos[3:7], np.pi/16))
     fw_right = quat_to_forward_vector(rotate_quat(data.qpos[3:7], -np.pi/16))
@@ -105,19 +115,19 @@ def get_crowdsourcing_costs(data):
     future_pos_left = data.qpos[:2] + 0.1 * fw_left
     future_pos_right = data.qpos[:2] + 0.1 * fw_right
     costs = {}
-    costs["FORWARD"] = crowdsourcing_cost(future_pos[0], future_pos[1], fw)
-    costs["LEFT"] = crowdsourcing_cost(future_pos_left[0], future_pos_left[1], fw_left)
-    costs["RIGHT"] = crowdsourcing_cost(future_pos_right[0], future_pos_right[1], fw_right)
+    costs["FORWARD"] = crowdsourcing_cost(future_pos[0], future_pos[1], fw, path, path_d)
+    costs["LEFT"] = crowdsourcing_cost(future_pos_left[0], future_pos_left[1], fw_left, path, path_d)
+    costs["RIGHT"] = crowdsourcing_cost(future_pos_right[0], future_pos_right[1], fw_right, path, path_d)
     print(costs)
     return costs
 
-def get_crowdsourcing_costs_prob(models, data):
+def get_crowdsourcing_costs_prob(models, data, path, path_d):
     def get_policy_cost(policy):
         curr_vels = data.qvel[:3]
         samples = np.random.multivariate_normal(np.dot(models[policy]['coeffs'], np.append(curr_vels, 1)), models[policy]['cov'], 100)
         future_pos = data.qpos[:2] + 0.002 * samples[:,:2]
         fw_vectors = [quat_to_forward_vector(rotate_quat(data.qpos[3:7], angle)) for angle in samples[:,2]*0.002]
-        cost_samples = [crowdsourcing_cost(x[0][0], x[0][1], x[1]) for x in zip(future_pos, fw_vectors)]
+        cost_samples = [crowdsourcing_cost(x[0][0], x[0][1], x[1], path, path_d) for x in zip(future_pos, fw_vectors)]
         return np.mean(cost_samples)
     costs = {policy: get_policy_cost(policy) for policy in models.keys()}
     return costs
@@ -196,14 +206,16 @@ if __name__ == "__main__":
     i = 0
     
     path_arr = get_path(np.array([0.0,0.0]), np.array([10.0,10.0]), cost_function)
-    t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
+    #t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
+    smoothed_path = ARMA_filter(path_arr, p=3, q=3)
+    path_d = path_tangent_vectors(smoothed_path)
     
-    path_data = {"path": path_arr, "fit_x": fit_x, "fit_y": fit_y, "fit_x_d": fit_x_d, "fit_y_d": fit_y_d, "t": t, "goal": goal, "obstacles": obstacles}
+    path_data = {"path": path_arr, "smoothed_path": smoothed_path, "path_d": path_d, "goal": goal, "obstacles": obstacles}
     pickle.dump(path_data, open(experiment_folder / "path_data.pkl", "wb"))
     
     _, fig_grad = export_cost_plots(cost_function, experiment_folder)
     fig_grad.axes[0].plot(path_arr[:,0], path_arr[:,1])
-    fig_grad.axes[0].plot(fit_x(t), fit_y(t))
+    fig_grad.axes[0].plot(smoothed_path[:,0], smoothed_path[:,1])
     fig_grad.savefig(experiment_folder / "path.png")
     
     input("Press Enter to continue...")
@@ -215,7 +227,8 @@ if __name__ == "__main__":
         with media.VideoWriter(video_path, fps=video_fps, shape=video_resolution) as video:
             models = pickle.load(open("/home/antonio/uni/tesi/mujoco_mpc/tuning/models_ols.pkl", "rb"))
             while viewer.is_running():
-                command_costs = get_crowdsourcing_costs_prob(models,data)
+                #command_costs = get_crowdsourcing_costs_prob(models, data, smoothed_path, path_d)
+                command_costs = get_crowdsourcing_costs(data, smoothed_path, path_d)
                 command = min(command_costs, key=command_costs.get)
                 data.mocap_pos, data.mocap_quat = get_mocap_reference(data, command)
                 # set planner state
