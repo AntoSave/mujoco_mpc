@@ -22,6 +22,12 @@ def get_experiment_folder():
 def log_data_point(experiment_file, data, command, data_cache):
     fw = quat_to_forward_vector(data.qpos[3:7])
     theta = np.arctan2(fw[1], fw[0])
+    # Get contact information
+    contact_info = { "LEFT": False, "RIGHT": False }
+    if np.isin([14,15,16], data.contact.geom2).any():
+        contact_info["LEFT"] = True
+    if np.isin([29, 30, 31], data.contact.geom2).any():
+        contact_info["RIGHT"] = True
     row = {
         'time': data.time,
         'command': command,
@@ -31,6 +37,8 @@ def log_data_point(experiment_file, data, command, data_cache):
         'vx': data.qvel[0],
         'vy': data.qvel[1],
         'omega': data.qvel[5],
+        'contact_left': contact_info["LEFT"],
+        'contact_right': contact_info["RIGHT"]
     }
     data_cache.append(row)
     if len(data_cache) >= 1000:
