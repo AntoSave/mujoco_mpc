@@ -105,6 +105,7 @@ def crowdsourcing_cost(x, y, forward_vector, path, path_d):
     x = np.array([x,y])
     closest_point, crosstrack_error, tangent_vector = closest_point_on_path(x, path, path_d)
     orientation_error = (np.dot(forward_vector, tangent_vector)-1)**2
+    print(f"Cross-track error: {crosstrack_error}, Orientation error: {orientation_error}")
     return crosstrack_error + 10*orientation_error
 
 def get_crowdsourcing_costs(data, path, path_d):
@@ -123,14 +124,80 @@ def get_crowdsourcing_costs(data, path, path_d):
 
 def get_crowdsourcing_costs_prob(models, data, path, path_d):
     def get_policy_cost(policy):
-        curr_vels = data.qvel[:3]
-        samples = np.random.multivariate_normal(np.dot(models[policy]['coeffs'], np.append(curr_vels, 1)), models[policy]['cov'], 100)
+        curr_vels = data.qvel[[0,1,5]]
+        samples = np.random.multivariate_normal(np.dot(models[policy]['coeffs'], np.append(curr_vels, 1)), models[policy]['cov'], 10000)
         future_pos = data.qpos[:2] + 0.002 * samples[:,:2]
-        fw_vectors = [quat_to_forward_vector(rotate_quat(data.qpos[3:7], angle)) for angle in samples[:,2]*0.002]
+        fw_vectors = [quat_to_forward_vector(rotate_quat(data.qpos[3:7], angle)) for angle in np.atan2(samples[:,1],samples[:,0])*0.002]
         cost_samples = [crowdsourcing_cost(x[0][0], x[0][1], x[1], path, path_d) for x in zip(future_pos, fw_vectors)]
         return np.mean(cost_samples)
     costs = {policy: get_policy_cost(policy) for policy in models.keys()}
     return costs
+
+def get_fno_from_delta(qpos, qpos_old, delta_time):
+    vx = (qpos[0] - qpos_old[0])/delta_time
+    vy = (qpos[1] - qpos_old[1])/delta_time
+    fw = quat_to_forward_vector(qpos[3:7])
+    theta = np.arctan2(fw[1], fw[0])
+    v_fw = np.dot([vx, vy], np.array([np.cos(theta), np.sin(theta)]))
+    v_n = np.dot([vx, vy], np.array([np.cos(theta+np.pi/2), np.sin(theta+np.pi/2)]))
+    fw_old = quat_to_forward_vector(qpos_old[3:7])
+    theta_old = np.arctan2(fw_old[1], fw_old[0])
+    omega = (theta - theta_old)/delta_time
+    return np.array([v_fw, v_n, omega])
+    
+
+def get_crowdsourcing_costs_prob_v2(models, data, curr_fno, old_fno, path, path_d):
+    """fno is [v_fw, f_n, omega]"""
+    fw = quat_to_forward_vector(data.qpos[3:7])
+    theta = np.arctan2(fw[1], fw[0])
+    lookahead_steps = 50
+    timestep = models['timestep']*lookahead_steps
+    def get_policy_cost(policy):
+        print(f"Policy: {policy}")
+        policy_coeffs = models['models'][policy]['coeffs']
+        policy_cov = models['models'][policy]['cov']
+        regressors = np.array([curr_fno[0], old_fno[0], curr_fno[1], old_fno[1], curr_fno[2], old_fno[2], 1])
+        means = np.matmul(policy_coeffs, regressors)
+        samples = np.random.multivariate_normal(means, policy_cov/10000, 100)
+        future_pos_x = data.qpos[0] + samples[:,0]*np.cos(theta)*timestep*10 + samples[:,1]*np.sin(theta)*timestep*10
+        future_pos_y = data.qpos[1] + samples[:,0]*np.sin(theta)*timestep*10 - samples[:,1]*np.cos(theta)*timestep*10
+        fw_vectors = [quat_to_forward_vector(rotate_quat(data.qpos[3:7], angle)) for angle in samples[:,2]*timestep]
+        cost_samples = [crowdsourcing_cost(x[0], x[1], x[2], path, path_d) for x in zip(future_pos_x, future_pos_y, fw_vectors)]
+        return np.mean(cost_samples)
+    costs = {policy: get_policy_cost(policy) for policy in models['models'].keys()}
+    return costs
+
+# def sample_varmax(model_params, Y, X):
+#     L1 = model_params['L1']
+#     L2 = model_params['L2']
+#     L3 = model_params['L3']
+#     L1_e = model_params['L1_e']
+#     beta = model_params['beta']
+#     intercept = model_params['intercept']
+#     sigma2 = model_params['sigma2']
+    
+#     epsilon_old = np.random.multivariate_normal(np.zeros(3), np.diag(sigma2), 100)
+#     epsilon = np.random.multivariate_normal(np.zeros(3), np.diag(sigma2), 100)
+    
+#     # Y dim is 3x3
+#     mean = intercept
+#     mean += np.dot(L1, Y[0])
+#     mean += np.dot(L2, Y[1])
+#     mean += np.dot(L3, Y[2])
+#     mean += np.dot(beta, X)
+#     return mean + np.squeeze(np.matmul(L1_e,np.expand_dims(epsilon_old, axis=-1))) + epsilon
+
+# def get_crowdsourcing_costs_varmax(models, data, last_increments, path, path_d):
+#     def get_policy_cost(policy):
+#         curr_vels = data.qvel[[0,1,5]]
+#         samples_increments = sample_varmax(models[policy], last_increments, curr_vels)
+#         samples = curr_vels + samples_increments # Model is in increments
+#         future_pos = data.qpos[:2] + 0.002 * samples[:,:2]
+#         fw_vectors = [quat_to_forward_vector(rotate_quat(data.qpos[3:7], angle)) for angle in samples[:,2]*0.002]
+#         cost_samples = [crowdsourcing_cost(x[0][0], x[0][1], x[1], path, path_d) for x in zip(future_pos, fw_vectors)]
+#         return np.mean(cost_samples)
+#     costs = {policy: get_policy_cost(policy) for policy in models.keys()}
+#     return costs
 
 def get_mocap_reference(data, command):
     fw = quat_to_forward_vector(data.qpos[3:7])
@@ -222,14 +289,27 @@ if __name__ == "__main__":
 
     TRAJ = []
     command = "FORWARD"
-
+    last_fno = np.zeros((2,3))
+    qpos_old = data.qpos[:7][:]
     with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() as executor:
         with media.VideoWriter(video_path, fps=video_fps, shape=video_resolution) as video:
-            models = pickle.load(open("/home/antonio/uni/tesi/mujoco_mpc/tuning/models_ols.pkl", "rb"))
+            models = pickle.load(open("/home/antonio/uni/tesi/mujoco_mpc/experiments/h1_teleop_experiments/2024-09-09_16-10-24/models_ols_fno.pkl", "rb"))
+            model_timestep = models['timestep']
+            downsample_factor = int(model_timestep / 0.002)
+            print(f"Model timestep: {model_timestep}")
             while viewer.is_running():
                 #command_costs = get_crowdsourcing_costs_prob(models, data, smoothed_path, path_d)
-                command_costs = get_crowdsourcing_costs(data, smoothed_path, path_d)
-                command = min(command_costs, key=command_costs.get)
+                #command_costs = get_crowdsourcing_costs(data, smoothed_path, path_d)
+                # print("last data", last_data.shape)
+                # last_data = np.append(last_data, np.array([[data.qvel[0], data.qvel[1], data.qvel[5]]]), axis=0)
+                # last_data = np.delete(last_data, 0, axis=0)
+                # print("last data", last_data)
+                # last_increments = np.diff(last_data, axis=0)
+                # print("last increments", last_increments)
+                # command_costs = get_crowdsourcing_costs_varmax(models, data, last_increments[-3:], smoothed_path, path_d)
+                if i % downsample_factor == 0 or True:
+                    command_costs = get_crowdsourcing_costs_prob_v2(models, data, last_fno[1], last_fno[0], smoothed_path, path_d)
+                    command = min(command_costs, key=command_costs.get)
                 data.mocap_pos, data.mocap_quat = get_mocap_reference(data, command)
                 # set planner state
                 agent.set_state(
@@ -245,6 +325,12 @@ if __name__ == "__main__":
                 data.ctrl = agent.get_action(nominal_action=False)
                 mujoco.mj_step(model, data)
                 viewer.sync()
+                
+                # Update fno
+                if i % downsample_factor == 0:
+                    last_fno[1] = last_fno[0]
+                    last_fno[0] = get_fno_from_delta(data.qpos, qpos_old, model_timestep)
+                    qpos_old = data.qpos[:7][:]
                 
                 # Render video
                 if frame_count < data.time * video_fps:
