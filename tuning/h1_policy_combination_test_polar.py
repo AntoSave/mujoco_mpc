@@ -27,11 +27,24 @@ def rotate_quat(quat, angle):
     r = r * scipy.spatial.transform.Rotation.from_euler('z', angle)
     return r.as_quat(canonical=True, scalar_first=True)
 
-def cost(x, goal=np.array([10.0, 10.0]), obstacles=np.array([[3.0, 3.0]])):
+def cost(x, goal=np.array([10.0, 10.0]), obstacles={'cylinders': np.array([[3.0, 3.0]])}, obstacles_data={'transition_end': False}):
     """Cost function for the planner. x is a two dimensional state vector."""
+    cylinder_obs = obstacles['cylinders']
+    swall_obs = obstacles['sliding_walls']
     c = np.linalg.norm(x - goal)
-    for o in obstacles:
+    for o in cylinder_obs:
         c += 30*scipy.stats.multivariate_normal.pdf(x, mean=o, cov=0.4*np.eye(2))
+    for o in swall_obs:
+        start_point, end_point = o[0], o[1]
+        length = np.linalg.norm(end_point-start_point)
+        n_obs = max(1,int(length / 1.0))
+        obs_perc = np.linspace(0, 1, n_obs)
+        if obstacles_data['transition_end']:
+            start_point = start_point + o[2]
+            end_point = end_point + o[2]
+        for perc in obs_perc:
+            obs_point = start_point + perc * (end_point - start_point)
+            c += 100*scipy.stats.multivariate_normal.pdf(x, mean=obs_point, cov=0.2*np.eye(2))
     return c
 
 def export_cost_plots(cost_function, directory_path = pathlib.Path(__file__).parent):
@@ -50,6 +63,7 @@ def export_cost_plots(cost_function, directory_path = pathlib.Path(__file__).par
     return fig_3d, fig_grad
 
 def get_path(starting_point, goal_point, cost_func, extreme_points=np.array([[0.0,0.0],[10.0,10.0]]), n_bins = 100):
+    """Gets a path from starting_point to goal_point using A*"""
     space_lengths = extreme_points[1] - extreme_points[0]
     step_sizes = space_lengths / n_bins
     starting_node = tuple(np.floor(starting_point / step_sizes).astype(int))
@@ -76,6 +90,7 @@ def get_path(starting_point, goal_point, cost_func, extreme_points=np.array([[0.
 # path_xy = cv2.dilate(path_xy, np.ones((3,3), np.uint8))
 # plt.imshow(path_xy, origin='lower')
 def fit_polynomial(path_arr, degree=10):
+    """Fits a polynomial of degree 'degree' to the path"""
     t = np.arange(path_arr.shape[0])
     fit_x = np.polynomial.polynomial.Polynomial.fit(t, path_arr[:,0], degree)
     fit_y = np.polynomial.polynomial.Polynomial.fit(t, path_arr[:,1], degree)
@@ -84,6 +99,7 @@ def fit_polynomial(path_arr, degree=10):
     return t, fit_x, fit_y, fit_x_d, fit_y_d
 
 def ARMA_filter(path, p = 3, q = 3):
+    """Applies and ARMA filter to the path to smooth it"""
     smoothed_path = np.zeros_like(path)
     for i, point in enumerate(path):
         smoothed_path[i] = np.mean(path[max(0, i-p):min(i+q, path.shape[0])], axis=0)
@@ -150,8 +166,9 @@ def get_crowdsourcing_costs_prob_v2(models, data, curr_fno, old_fno, path, path_
     """fno is [v_fw, f_n, omega]"""
     fw = quat_to_forward_vector(data.qpos[3:7])
     theta = np.arctan2(fw[1], fw[0])
-    lookahead_steps = 50
-    timestep = models['timestep']*lookahead_steps
+    lookahead_steps_xy = 500
+    lookahead_steps_angle = 50
+    timestep = models['timestep']
     def get_policy_cost(policy):
         print(f"Policy: {policy}")
         policy_coeffs = models['models'][policy]['coeffs']
@@ -159,9 +176,9 @@ def get_crowdsourcing_costs_prob_v2(models, data, curr_fno, old_fno, path, path_
         regressors = np.array([curr_fno[0], old_fno[0], curr_fno[1], old_fno[1], curr_fno[2], old_fno[2], 1])
         means = np.matmul(policy_coeffs, regressors)
         samples = np.random.multivariate_normal(means, policy_cov/10000, 100)
-        future_pos_x = data.qpos[0] + samples[:,0]*np.cos(theta)*timestep*10 + samples[:,1]*np.sin(theta)*timestep*10
-        future_pos_y = data.qpos[1] + samples[:,0]*np.sin(theta)*timestep*10 - samples[:,1]*np.cos(theta)*timestep*10
-        fw_vectors = [quat_to_forward_vector(rotate_quat(data.qpos[3:7], angle)) for angle in samples[:,2]*timestep]
+        future_pos_x = data.qpos[0] + samples[:,0]*np.cos(theta)*timestep*lookahead_steps_xy + samples[:,1]*np.sin(theta)*timestep*lookahead_steps_xy
+        future_pos_y = data.qpos[1] + samples[:,0]*np.sin(theta)*timestep*lookahead_steps_xy - samples[:,1]*np.cos(theta)*timestep*lookahead_steps_xy
+        fw_vectors = [quat_to_forward_vector(rotate_quat(data.qpos[3:7], angle)) for angle in samples[:,2]*timestep*lookahead_steps_angle]
         cost_samples = [crowdsourcing_cost(x[0], x[1], x[2], path, path_d) for x in zip(future_pos_x, future_pos_y, fw_vectors)]
         return np.mean(cost_samples)
     costs = {policy: get_policy_cost(policy) for policy in models['models'].keys()}
@@ -216,7 +233,7 @@ def get_mocap_reference(data, command):
     return pos_ref, quat_ref
 
 def add_obstacles(model_spec, obstacles):
-    for i, o in enumerate(obstacles):
+    for i, o in enumerate(obstacles['cylinders']):
         body = model_spec.worldbody.add_body()
         body.name = f"obstacle_{i}"
         body.pos = o.tolist() + [0.5]
@@ -225,11 +242,52 @@ def add_obstacles(model_spec, obstacles):
         geom.type = mujoco.mjtGeom.mjGEOM_CYLINDER
         geom.size = [0.8, 0.8, 0.5]
         geom.rgba = [1, 0, 0, 1]
+        
+    for i, o in enumerate(obstacles['sliding_walls']):
+        start_point = o[0]
+        end_point = o[1]
+        mean_point = (start_point + end_point)/2
+        yaw = np.arctan2(end_point[1]-start_point[1], end_point[0]-start_point[0])
+        length = np.linalg.norm(end_point-start_point)
+        body = model_spec.worldbody.add_body()
+        body.name = f"obstacle_swall_{i}"
+        body.pos = mean_point.tolist() + [1.0]
+        body.quat = scipy.spatial.transform.Rotation.from_euler('z', yaw).as_quat(scalar_first=True)
+        geom = body.add_geom()
+        geom.name = f"obstacle_swall_geom_{i}"
+        geom.type = mujoco.mjtGeom.mjGEOM_BOX
+        geom.size = [length/2, 0.2, 1.0]
+        geom.rgba = [1, 0, 0, 1]
+
+def update_dynamic_obs(obstacles, obstacles_data, mujoco_model):
+    if not obstacles_data['trigger']:
+        return
+    transition_end = True
+    for (i, (o, o_pos)) in enumerate(zip(obstacles['sliding_walls'], obstacles_data['sliding_walls'])):
+        translation = np.linalg.norm(o[2])
+        direction = o[2]/translation
+        if np.dot(direction, o_pos) >= translation:
+            continue
+        transition_end = False
+        o_pos += direction * mujoco_model.opt.timestep * 10.0
+        start_point = o[0]
+        end_point = o[1]
+        mean_point = (start_point + end_point)/2
+        new_mean_point = mean_point + o_pos
+        body = mujoco_model.body(f"obstacle_swall_{i}")
+        body.pos = new_mean_point.tolist() + [1.0]
+        #body.xipos = body.xpos
+    obstacles_data['transition_end'] = transition_end
 
 if __name__ == "__main__":
-    goal = np.array([10.0, 10.0])
-    obstacles = np.array([[3.0, 3.0], [5.0, 5.0]])
-    cost_function = lambda x: cost(x, goal=goal, obstacles=obstacles)
+    goal = np.array([2.5, 10.0])
+    
+    obstacles = {
+        "cylinders": np.array([]),#np.array([[3.0, 3.0], [5.0, 5.0]]),
+        "sliding_walls": np.array([[[5.0, 5.0], [10.0, 5.0], [-5.0, 0.0]]]), #[[[start_x, start_y], [end_x, end_y], [translation_x, translation_y]]] #np.array([])
+    }
+    obstacles_data = {"sliding_walls": np.array([[0.0, 0.0]]), "trigger": False, "transition_end": False}
+    cost_function = lambda x: cost(x, goal=goal, obstacles=obstacles, obstacles_data=obstacles_data)
     
     model_path = (
         pathlib.Path(__file__).parent
@@ -272,10 +330,11 @@ if __name__ == "__main__":
     steps_per_planning_iteration = 10
     i = 0
     
-    path_arr = get_path(np.array([0.0,0.0]), np.array([10.0,10.0]), cost_function)
+    path_arr = get_path(data.qpos[:2], goal, cost_function)
     #t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
     smoothed_path = ARMA_filter(path_arr, p=3, q=3)
     path_d = path_tangent_vectors(smoothed_path)
+    path_updated = False
     
     path_data = {"path": path_arr, "smoothed_path": smoothed_path, "path_d": path_d, "goal": goal, "obstacles": obstacles}
     pickle.dump(path_data, open(experiment_folder / "path_data.pkl", "wb"))
@@ -331,6 +390,18 @@ if __name__ == "__main__":
                     last_fno[1] = last_fno[0]
                     last_fno[0] = get_fno_from_delta(data.qpos, qpos_old, model_timestep)
                     qpos_old = data.qpos[:7][:]
+                    
+                # Update dynamic obstacles
+                if data.qpos[1] > 2.5:
+                    obstacles_data['trigger'] = True
+                update_dynamic_obs(obstacles, obstacles_data, model)
+                if obstacles_data['transition_end'] and not path_updated:
+                    # Update path
+                    print("Updating path")
+                    path_arr = get_path(data.qpos[:2], goal, cost_function)
+                    smoothed_path = ARMA_filter(path_arr, p=3, q=3)
+                    path_d = path_tangent_vectors(smoothed_path)
+                    path_updated = True
                 
                 # Render video
                 if frame_count < data.time * video_fps:
