@@ -98,11 +98,16 @@ def fit_polynomial(path_arr, degree=10):
     fit_y_d = fit_y.deriv()
     return t, fit_x, fit_y, fit_x_d, fit_y_d
 
-def ARMA_filter(path, p = 3, q = 3):
-    """Applies and ARMA filter to the path to smooth it"""
-    smoothed_path = np.zeros_like(path)
-    for i, point in enumerate(path):
-        smoothed_path[i] = np.mean(path[max(0, i-p):min(i+q, path.shape[0])], axis=0)
+def MA_filter(path, p = 3, q = 3):
+    """Applies a MA filter to the path to smooth it"""
+    extended_path = np.concatenate([path[0]*np.ones((p,2)), path, path[-1]*np.ones((q,2))], axis=0)
+    smoothed_path = np.zeros_like(extended_path)
+    for i in range(extended_path.shape[0]):
+        smoothed_path[i] = np.mean(extended_path[max(0, i-p):min(i+q, extended_path.shape[0])], axis=0)
+    path_diff = np.diff(smoothed_path, axis=0)
+    distances = np.linalg.norm(path_diff, axis=1)
+    critical_points = np.argwhere(distances < 0.03) + 1
+    smoothed_path = np.delete(smoothed_path, critical_points, axis=0)
     return smoothed_path
 
 def path_tangent_vectors(path):
@@ -121,7 +126,9 @@ def crowdsourcing_cost(x, y, forward_vector, path, path_d):
     x = np.array([x,y])
     closest_point, crosstrack_error, tangent_vector = closest_point_on_path(x, path, path_d)
     orientation_error = (np.dot(forward_vector, tangent_vector)-1)**2
-    print(f"Cross-track error: {crosstrack_error}, Orientation error: {orientation_error}")
+    # if np.isnan(orientation_error):
+    #     print(f"Forward vector: {forward_vector}, tangent vector: {tangent_vector}")
+    #print(f"Cross-track error: {crosstrack_error}, Orientation error: {orientation_error}")
     return crosstrack_error + 10*orientation_error
 
 def get_crowdsourcing_costs(data, path, path_d):
@@ -280,13 +287,16 @@ def update_dynamic_obs(obstacles, obstacles_data, mujoco_model):
     obstacles_data['transition_end'] = transition_end
 
 if __name__ == "__main__":
-    goal = np.array([2.5, 10.0])
+    start = np.array([5.0, 0.0])
+    goal = np.array([6.0, 10.0])
     
     obstacles = {
         "cylinders": np.array([]),#np.array([[3.0, 3.0], [5.0, 5.0]]),
-        "sliding_walls": np.array([[[5.0, 5.0], [10.0, 5.0], [-5.0, 0.0]]]), #[[[start_x, start_y], [end_x, end_y], [translation_x, translation_y]]] #np.array([])
+        "sliding_walls": np.array([[[3.33,0.0], [3.33,3.33], [0.0,3.33]],
+                                   [[6.66,0.0], [6.66,3.33], [0.0,3.33]],
+                                   [[0.0, 6.66], [3.33, 6.66], [3.33, 0.0]]])#np.array([[[5.0, 5.0], [10.0, 5.0], [-5.0, 0.0]]]), #[[[start_x, start_y], [end_x, end_y], [translation_x, translation_y]]] #
     }
-    obstacles_data = {"sliding_walls": np.array([[0.0, 0.0]]), "trigger": False, "transition_end": False}
+    obstacles_data = {"sliding_walls": np.array([[0.0, 0.0], [0.0,0.0], [0.0,0.0]]), "trigger": False, "transition_end": False}
     cost_function = lambda x: cost(x, goal=goal, obstacles=obstacles, obstacles_data=obstacles_data)
     
     model_path = (
@@ -301,6 +311,7 @@ if __name__ == "__main__":
     model.opt.timestep = 0.002
     # data
     data = mujoco.MjData(model)
+    data.qpos[:2] = start
     # agents
     agent = agent_lib.Agent(task_id="H1 Walk", 
                             model=model, 
@@ -332,8 +343,9 @@ if __name__ == "__main__":
     
     path_arr = get_path(data.qpos[:2], goal, cost_function)
     #t, fit_x, fit_y, fit_x_d, fit_y_d = fit_polynomial(path_arr)
-    smoothed_path = ARMA_filter(path_arr, p=3, q=3)
+    smoothed_path = MA_filter(path_arr, p=15, q=15)
     path_d = path_tangent_vectors(smoothed_path)
+    print(smoothed_path)
     path_updated = False
     
     path_data = {"path": path_arr, "smoothed_path": smoothed_path, "path_d": path_d, "goal": goal, "obstacles": obstacles}
@@ -399,7 +411,7 @@ if __name__ == "__main__":
                     # Update path
                     print("Updating path")
                     path_arr = get_path(data.qpos[:2], goal, cost_function)
-                    smoothed_path = ARMA_filter(path_arr, p=3, q=3)
+                    smoothed_path = MA_filter(path_arr, p=15, q=15)
                     path_d = path_tangent_vectors(smoothed_path)
                     path_updated = True
                 
