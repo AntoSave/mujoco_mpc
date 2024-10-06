@@ -1,3 +1,5 @@
+"""Test script for the obstacle avoidance task with absolute motion services"""
+
 from datetime import datetime
 import matplotlib.pyplot as plt
 import mujoco

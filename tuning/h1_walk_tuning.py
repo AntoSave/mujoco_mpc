@@ -1,3 +1,5 @@
+"""Base script that has been used for tuning the H1 Walk task."""
+
 import copy
 import datetime as dt
 import matplotlib.pyplot as plt

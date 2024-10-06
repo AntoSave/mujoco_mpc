@@ -1,13 +1,11 @@
-import copy
-import datetime as dt
-import matplotlib.pyplot as plt
+"""This script is used to render a video of the H1 Walk task with the MujocoMPC agent. 
+The goal dynamically changes to four different positions in the environment."""
+
 import mediapy as media
 import mujoco
 import mujoco.viewer
 import numpy as np
 import pathlib
-import time
-import cv2
 
 from mujoco_mpc import agent as agent_lib
 

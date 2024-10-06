@@ -1,3 +1,4 @@
+"""A tool for visualizing trajectories in MuJoCo using Dear PyGui."""
 
 import copy
 import gymnasium as gym

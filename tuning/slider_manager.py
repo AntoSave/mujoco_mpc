@@ -1,3 +1,5 @@
+"""A library for creating and managing sliders using Dear PyGui."""
+
 import dearpygui.dearpygui as dpg
 from multiprocessing import Process, Array
 import time 

@@ -1,3 +1,5 @@
+"""A library for creating and managing real-time plots using Dear PyGui."""
+
 import matplotlib.pyplot as plt
 import numpy as np
 import math

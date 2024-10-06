@@ -1,3 +1,5 @@
+"""A library for creating and managing MuJoCo visualization objects."""
+
 import mujoco
 
 class Geometry:

@@ -1,3 +1,7 @@
+"""This script is used to test the MujocoMPC baseline agent in a given envorionment with obstacles.
+The expected behavior is that the agent will collide with the obstacles as the planning horizon of
+MJPC is too short to avoid them."""
+
 import pygame
 from datetime import datetime
 import matplotlib.pyplot as plt

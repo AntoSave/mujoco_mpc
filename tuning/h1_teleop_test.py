@@ -1,3 +1,5 @@
+"""This script allows for the teleoperation of the H1 Walk task using the WAD keys."""
+
 import pygame
 from datetime import datetime
 import matplotlib.pyplot as plt
