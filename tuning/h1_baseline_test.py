@@ -117,16 +117,17 @@ if __name__ == "__main__":
     renderer = mujoco.Renderer(model, height=video_resolution[0], width=video_resolution[1])
     # Experiment data logging
     data_cache = []
-    TRAJ = []
+    # TRAJ = []
     log_data_point(experiment_file, data, None, data_cache)
     # Planning settings
     i=0
     steps_per_planning_iteration = 10
+    done = False
     with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() as executor:
+        data.mocap_pos[0,:2] = np.array([10.0, 10.0])
+        data.mocap_quat[0] = rotate_quat(np.array([0, 0, 0, 1]), np.pi/2)
         with media.VideoWriter(video_path, fps=video_fps, shape=video_resolution) as video:
             while viewer.is_running():
-                data.mocap_pos[0,:2] = np.array([10.0, 10.0])
-                
                 # Planning and control
                 agent.set_state(
                     time=data.time,
@@ -153,9 +154,9 @@ if __name__ == "__main__":
                 # Synchonize viewer, log data point
                 viewer.sync()
                 log_data_point(experiment_file, data, None, data_cache)
-                if i%10 == 0:
-                    TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
-            TRAJ = np.stack(TRAJ)
-            np.save(experiment_folder / "traj.npy", TRAJ)
-            pygame.quit()
+            #     if i%10 == 0:
+            #         TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
+            # TRAJ = np.stack(TRAJ)
+            # np.save(experiment_folder / "traj.npy", TRAJ)
+            #pygame.quit()
             exit()
