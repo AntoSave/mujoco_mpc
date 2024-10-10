@@ -54,6 +54,8 @@ add_library(
   tasks/h1/trot/trot.h
   tasks/h1/walk/walk.cc
   tasks/h1/walk/walk.h
+  tasks/h1/walk-obs/walk.cc
+  tasks/h1/walk-obs/walk.h
   tasks/h1/tracking/tracking.cc
   tasks/h1/tracking/tracking.h
   tasks/humanoid/interact/interact.cc

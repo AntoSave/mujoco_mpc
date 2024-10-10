@@ -27,6 +27,7 @@
 #include "mjpc/tasks/fingers/fingers.h"
 #include "mjpc/tasks/h1/trot/trot.h"
 #include "mjpc/tasks/h1/walk/walk.h"
+#include "mjpc/tasks/h1/walk-obs/walk.h"
 #include "mjpc/tasks/h1/tracking/tracking.h"
 #include "mjpc/tasks/humanoid/interact/interact.h"
 #include "mjpc/tasks/humanoid/stand/stand.h"
@@ -57,6 +58,7 @@ std::vector<std::shared_ptr<Task>> GetTasks() {
       std::make_shared<Fingers>(),
       std::make_shared<h1::Trot>(),
       std::make_shared<h1::Walk>(),
+      std::make_shared<h1::WalkObs>(),
       std::make_shared<h1::Tracking>(),
       std::make_shared<humanoid::Interact>(),
       std::make_shared<humanoid::Stand>(),
