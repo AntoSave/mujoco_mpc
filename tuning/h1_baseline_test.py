@@ -17,6 +17,68 @@ from concurrent.futures import ThreadPoolExecutor
 from mujoco_mpc import agent as agent_lib
 import scipy.stats
 
+def quat_to_forward_vector(quat):
+    return scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=True).as_matrix()[:2,0]
+
+def vector_to_quat(vector):
+    return scipy.spatial.transform.Rotation.from_euler('z', np.arctan2(vector[1], vector[0])).as_quat(canonical=True, scalar_first=True)
+
+def rotate_quat(quat, angle):
+    r = scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=True)
+    r = r * scipy.spatial.transform.Rotation.from_euler('z', angle)
+    return r.as_quat(canonical=True, scalar_first=True)
+    
+
+AGENTS = {
+    "baseline_1": {
+        "task_id": "H1 Walk",
+        "cost_weights": {'Posture arms': 0.06, 'Posture torso': 0.05, 'Face goal': 4.0}
+    },
+    "baseline_2": {
+        "task_id": "H1 WalkObs",
+        "cost_weights": {'Obstacles': 10.0, "Control": 0.0001}
+    },
+    "baseline_2_no_obs": {
+        "task_id": "H1 WalkObs",
+        "cost_weights": {'Obstacles': 0.0, "Control": 0.0001}
+    }
+}
+
+ENVIRONMENTS = {
+    "cylinders": {
+        "obstacles": {
+            "cylinders": np.array([[3.0, 3.0], [5.0, 5.0]]),
+            "sliding_walls": np.array([])
+        },
+        "obstacles_data": {
+            "sliding_walls": np.array([]),
+            "trigger": False,
+            "transition_end": False
+        }, 
+        "trigger_cond": lambda data: False,
+        "start_pos": np.array([0.0, 0.0]),
+        "start_quat": np.array([0.0, 0.0, 0.0, 1.0]),
+        "goal_pos": np.array([10.0, 10.0]),
+    },
+    "sliding_walls": {
+        "obstacles": {
+            "cylinders": np.array([]),
+            "sliding_walls": np.array([[[3.33,0.0], [3.33,3.33], [0.0,3.33]],
+                                   [[6.66,0.0], [6.66,3.33], [0.0,3.33]],
+                                   [[0.0, 6.66], [3.33, 6.66], [3.33, 0.0]]])
+        },
+        "obstacles_data": {
+            "sliding_walls": np.array([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]),
+            "trigger": False,
+            "transition_end": False
+        },
+        "trigger_cond": lambda data: data.qpos[1] > 2.5,
+        "start_pos": np.array([5.0, 0.0]),
+        "start_quat": rotate_quat(np.array([1.0, 0.0, 0.0, 0.0]), np.pi/2),
+        "goal_pos": np.array([6.0, 10.0]),
+    }
+}
+
 def get_experiment_folder():
     experiment_folder = pathlib.Path(__file__).parent.parent / "experiments" / "h1_baseline" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if not experiment_folder.exists():
@@ -55,18 +117,6 @@ def plan_and_get_trajectory(agent):
         agent.planner_step()
     return agent.best_trajectory()
 
-def quat_to_forward_vector(quat):
-    return scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=True).as_matrix()[:2,0]
-
-def vector_to_quat(vector):
-    return scipy.spatial.transform.Rotation.from_euler('z', np.arctan2(vector[1], vector[0])).as_quat(canonical=True, scalar_first=True)
-
-def rotate_quat(quat, angle):
-    r = scipy.spatial.transform.Rotation.from_quat(quat, scalar_first=True)
-    r = r * scipy.spatial.transform.Rotation.from_euler('z', angle)
-    return r.as_quat(canonical=True, scalar_first=True)
-    
-
 def add_obstacles(model_spec, obstacles):
     for i, o in enumerate(obstacles['cylinders']):
         body = model_spec.worldbody.add_body()
@@ -77,11 +127,47 @@ def add_obstacles(model_spec, obstacles):
         geom.type = mujoco.mjtGeom.mjGEOM_CYLINDER
         geom.size = [0.8, 0.8, 0.5]
         geom.rgba = [1, 0, 0, 1]
+        
+    for i, o in enumerate(obstacles['sliding_walls']):
+        start_point = o[0]
+        end_point = o[1]
+        mean_point = (start_point + end_point)/2
+        yaw = np.arctan2(end_point[1]-start_point[1], end_point[0]-start_point[0])
+        length = np.linalg.norm(end_point-start_point)
+        body = model_spec.worldbody.add_body()
+        body.name = f"obstacle_swall_{i}"
+        body.pos = mean_point.tolist() + [1.0]
+        body.quat = scipy.spatial.transform.Rotation.from_euler('z', yaw).as_quat(scalar_first=True)
+        geom = body.add_geom()
+        geom.name = f"obstacle_swall_geom_{i}"
+        geom.type = mujoco.mjtGeom.mjGEOM_BOX
+        geom.size = [length/2, 0.2, 1.0]
+        geom.rgba = [1, 0, 0, 1]
+        
+def update_dynamic_obs(obstacles, obstacles_data, mujoco_model):
+    if not obstacles_data['trigger']:
+        return
+    transition_end = True
+    for (i, (o, o_pos)) in enumerate(zip(obstacles['sliding_walls'], obstacles_data['sliding_walls'])):
+        translation = np.linalg.norm(o[2])
+        direction = o[2]/translation
+        if np.dot(direction, o_pos) >= translation:
+            continue
+        transition_end = False
+        o_pos += direction * mujoco_model.opt.timestep * 10.0
+        start_point = o[0]
+        end_point = o[1]
+        mean_point = (start_point + end_point)/2
+        new_mean_point = mean_point + o_pos
+        body = mujoco_model.body(f"obstacle_swall_{i}")
+        body.pos = new_mean_point.tolist() + [1.0]
+        #body.xipos = body.xpos
+    obstacles_data['transition_end'] = transition_end
 
 if __name__ == "__main__":
-    obstacles = {
-        "cylinders": np.array([[3.0, 3.0], [5.0, 5.0]])
-    }
+    selected_agent = "baseline_2_no_obs"
+    selected_environment = "sliding_walls"
+    obstacles = ENVIRONMENTS[selected_environment]["obstacles"]
     # Model and agent initialization
     model_path = (
         pathlib.Path(__file__).parent
@@ -98,12 +184,16 @@ if __name__ == "__main__":
     model = model_spec.compile()
     model.opt.timestep = 0.002
     data = mujoco.MjData(model)
-    agent = agent_lib.Agent(task_id="H1 Walk", 
+    data.qpos[:2] = ENVIRONMENTS[selected_environment]["start_pos"]
+    data.qpos[3:7] = ENVIRONMENTS[selected_environment]["start_quat"]
+    data.mocap_pos[0,:2] = ENVIRONMENTS[selected_environment]["goal_pos"]
+    data.mocap_quat[0] = rotate_quat(np.array([0, 0, 0, 1]), np.pi/2)
+    agent = agent_lib.Agent(task_id=AGENTS[selected_agent]["task_id"], 
                         model=model, 
                         server_binary_path=pathlib.Path(agent_lib.__file__).parent
                         / "mjpc"
                         / "agent_server")
-    agent.set_cost_weights({'Posture arms': 0.06, 'Posture torso': 0.05, 'Face goal': 4.0})
+    agent.set_cost_weights(AGENTS[selected_agent]["cost_weights"])
     # Video rendering
     current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     experiment_folder = get_experiment_folder()
@@ -121,11 +211,9 @@ if __name__ == "__main__":
     log_data_point(experiment_file, data, None, data_cache)
     # Planning settings
     i=0
-    steps_per_planning_iteration = 10
+    steps_per_planning_iteration = 1
     done = False
     with mujoco.viewer.launch_passive(model, data) as viewer, ThreadPoolExecutor() as executor:
-        data.mocap_pos[0,:2] = np.array([10.0, 10.0])
-        data.mocap_quat[0] = rotate_quat(np.array([0, 0, 0, 1]), np.pi/2)
         with media.VideoWriter(video_path, fps=video_fps, shape=video_resolution) as video:
             while viewer.is_running():
                 # Planning and control
@@ -153,6 +241,12 @@ if __name__ == "__main__":
                 
                 # Synchonize viewer, log data point
                 viewer.sync()
+                
+                # Update dynamic obstacles
+                if ENVIRONMENTS[selected_environment]["trigger_cond"](data) and not ENVIRONMENTS[selected_environment]["obstacles_data"]["trigger"]:
+                    ENVIRONMENTS[selected_environment]["obstacles_data"]['trigger'] = True
+                update_dynamic_obs(ENVIRONMENTS[selected_environment]["obstacles"], ENVIRONMENTS[selected_environment]["obstacles_data"], model)
+                
                 log_data_point(experiment_file, data, None, data_cache)
             #     if i%10 == 0:
             #         TRAJ.append(np.concatenate((np.asarray([data.time]),np.array(data.qpos),np.array(data.qvel))))
